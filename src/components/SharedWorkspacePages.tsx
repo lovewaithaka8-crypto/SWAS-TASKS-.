@@ -915,6 +915,7 @@ function AccountPages({
     firebaseUser,
     userPrivate,
     changeAccountPassword,
+    linkGoogleToCurrentUser,
     resendVerificationEmail,
     refreshVerificationState,
   } = useAuth();
@@ -942,6 +943,9 @@ function AccountPages({
   const [pwBusy, setPwBusy] = useState(false);
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const [pwErr, setPwErr] = useState<string | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkMsg, setLinkMsg] = useState<string | null>(null);
+  const [linkErr, setLinkErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (userPrivate) {
@@ -963,6 +967,25 @@ function AccountPages({
 
   const isWorker = userPrivate.role === 'worker';
   const isPasswordUser = firebaseUser.providerData.some((p) => p.providerId === 'password');
+  const isGoogleUser = firebaseUser.providerData.some((p) => p.providerId === 'google.com');
+  const providerSummary =
+    [isGoogleUser ? 'Google Sign-In' : null, isPasswordUser ? 'Email & Password' : null]
+      .filter(Boolean)
+      .join(' · ') || 'Google Sign-In';
+
+  const handleLinkGoogle = async () => {
+    setLinkBusy(true);
+    setLinkMsg(null);
+    setLinkErr(null);
+    try {
+      await linkGoogleToCurrentUser();
+      setLinkMsg('Google Sign-In linked to your account successfully.');
+    } catch (err) {
+      setLinkErr(err instanceof Error ? err.message : 'Unable to link Google account.');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1276,10 +1299,37 @@ function AccountPages({
           <div className="p-4 rounded-[10px] bg-[#f9fbfe] border border-[#e1e8f2]">
             <span className="block swas-desc">Authentication Method</span>
             <strong className="text-[14px] font-semibold text-[#172b46]">
-              {isPasswordUser ? 'Email & Password' : 'Google Sign-In'}
+              {providerSummary}
             </strong>
           </div>
         </div>
+
+        {linkMsg && (
+          <div className="p-3 rounded-[9px] bg-[#eaf8f2] border border-[#bce8d4] text-[13px] text-[#15966b]">
+            {linkMsg}
+          </div>
+        )}
+        {linkErr && (
+          <div className="p-3 rounded-[9px] bg-[#fff0f0] border border-[#f1c7c7] text-[13px] text-[#d34552]">
+            {linkErr}
+          </div>
+        )}
+
+        {!isGoogleUser && (
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#e1e8f2]">
+            <p className="swas-desc">
+              Link your Google account for faster, one-click authentication on SWAS TASKS.
+            </p>
+            <button
+              type="button"
+              disabled={linkBusy}
+              onClick={handleLinkGoogle}
+              className="px-4 py-2 bg-white border border-[#dce5f0] text-[#172b46] swas-btn-text rounded-[9px] hover:bg-[#e9f2ff] disabled:opacity-60 cursor-pointer"
+            >
+              {linkBusy ? 'Linking...' : 'Link Google Account'}
+            </button>
+          </div>
+        )}
 
         {!firebaseUser.emailVerified && (
           <div className="flex flex-wrap gap-2">

@@ -1,27 +1,43 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
+  browserLocalPersistence,
+  browserSessionPersistence,
   createUserWithEmailAndPassword,
   EmailAuthProvider,
+  GoogleAuthProvider,
+  linkWithCredential,
+  linkWithPopup,
   onAuthStateChanged,
   reauthenticateWithCredential,
   sendEmailVerification,
   sendPasswordResetEmail,
+  setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
   updatePassword,
   updateProfile,
+  type AuthCredential,
   type User,
 } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
-import { createUserAccountDocs, pushNotification } from '../lib/marketplaceService';
+import {
+  createUserAccountDocs,
+  pushNotification,
+  syncGoogleProfileMetadataIfNeeded,
+} from '../lib/marketplaceService';
 import type { PublicProfile, UserPrivate, UserRole } from '../types/marketplace';
 
 interface PendingOnboarding {
   role: UserRole;
   displayName?: string;
   businessName?: string;
+}
+
+export interface PendingGoogleLink {
+  email: string;
+  credential: AuthCredential;
 }
 
 const PENDING_KEY = 'swas_pending_onboarding';
@@ -51,21 +67,42 @@ function clearPendingOnboarding() {
   }
 }
 
-function friendlyAuthError(err: unknown): string {
+function friendlyAuthError(err: unknown, context: 'google' | 'email' = 'email'): string {
   const code = (err as { code?: string })?.code;
+  if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+    if (context === 'google') {
+      return 'Google Sign-In is not enabled in Firebase Authentication yet. Enable the Google provider in Firebase Console and verify this site’s domain under Authorized domains.';
+    }
+    return 'Email and password authentication is temporarily unavailable while our team completes setup. Please use Continue with Google below for immediate access.';
+  }
+
   const map: Record<string, string> = {
-    'auth/email-already-in-use': 'An account already exists with this email address.',
+    'auth/email-already-in-use':
+      'An account already exists with this email address. Try signing in or using Continue with Google.',
     'auth/invalid-email': 'Enter a valid email address.',
     'auth/weak-password': 'Password must be at least 6 characters (8+ recommended).',
     'auth/invalid-credential': 'Incorrect email or password.',
     'auth/user-not-found': 'No account found with that email address.',
     'auth/wrong-password': 'Incorrect password.',
     'auth/too-many-requests': 'Too many attempts. Wait a moment and try again.',
-    'auth/popup-closed-by-user': 'Google sign-in popup was closed before finishing.',
-    'auth/popup-blocked': 'Browser blocked the sign-in popup. Allow popups for this site.',
+    'auth/popup-closed-by-user':
+      'Google sign-in was closed before finishing. Click Continue with Google to try again.',
+    'auth/cancelled-popup-request':
+      'Another Google sign-in window is already open. Complete or close it and try again.',
+    'auth/popup-blocked':
+      'Your browser blocked the Google sign-in popup. Allow popups for this site and try again.',
+    'auth/unauthorized-domain':
+      'This domain is not yet authorized in Firebase Authentication. Add this site under Firebase Console → Authentication → Settings → Authorized domains.',
+    'auth/account-exists-with-different-credential':
+      'An account with this email already exists using Email & Password. Enter your existing SWAS TASKS password below to securely link Google Sign-In.',
+    'auth/credential-already-in-use':
+      'This Google account is already linked to another SWAS TASKS account.',
+    'auth/provider-already-linked': 'Google Sign-In is already linked to your account.',
+    'auth/network-request-failed':
+      'Network error while connecting to authentication servers. Check your connection and try again.',
+    'auth/user-disabled':
+      'This account has been disabled. Contact SWAS TASKS support for assistance.',
     'auth/requires-recent-login': 'Please verify your current password before updating.',
-    'auth/operation-not-allowed':
-      'Email/Password sign-in is not yet enabled in Firebase Console (Authentication → Sign-in method → Email/Password). Enable it in Firebase Console or use Google Sign-In below.',
   };
   return (code && map[code]) || (err instanceof Error ? err.message : 'Authentication failed.');
 }
@@ -79,8 +116,13 @@ interface AuthContextValue {
   authReady: boolean;
   signingIn: boolean;
   authError: string | null;
+  emailAuthUnavailable: boolean;
+  pendingGoogleLink: PendingGoogleLink | null;
   clearAuthError: () => void;
-  signInWithGoogle: (onboarding?: PendingOnboarding) => Promise<boolean>;
+  clearPendingGoogleLink: () => void;
+  signInWithGoogle: (onboarding?: PendingOnboarding, rememberMe?: boolean) => Promise<boolean>;
+  completePendingGoogleLink: (password: string) => Promise<boolean>;
+  linkGoogleToCurrentUser: () => Promise<void>;
   registerWithEmail: (params: {
     email: string;
     password: string;
@@ -88,7 +130,7 @@ interface AuthContextValue {
     role: UserRole;
     businessName?: string;
   }) => Promise<boolean>;
-  loginWithEmail: (email: string, password: string) => Promise<boolean>;
+  loginWithEmail: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
   resetPassword: (email: string) => Promise<boolean>;
   changeAccountPassword: (currentPassword: string, newPassword: string) => Promise<void>;
   resendVerificationEmail: () => Promise<void>;
@@ -107,6 +149,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authReady, setAuthReady] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [emailAuthUnavailable, setEmailAuthUnavailable] = useState(false);
+  const [pendingGoogleLink, setPendingGoogleLink] = useState<PendingGoogleLink | null>(null);
 
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
@@ -177,10 +221,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authReady && firebaseUser && firebaseUser.emailVerified && profileLoaded && !userPrivate
   );
 
-  async function signInWithGoogle(onboarding?: PendingOnboarding): Promise<boolean> {
+  async function signInWithGoogle(
+    onboarding?: PendingOnboarding,
+    rememberMe = true
+  ): Promise<boolean> {
     setSigningIn(true);
     setAuthError(null);
+    setPendingGoogleLink(null);
     try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       if (onboarding) savePendingOnboarding(onboarding);
       const cred = await signInWithPopup(auth, googleProvider);
       if (onboarding && cred.user.emailVerified) {
@@ -191,13 +240,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           onboarding.businessName
         );
         clearPendingOnboarding();
+      } else if (cred.user.emailVerified) {
+        await syncGoogleProfileMetadataIfNeeded(cred.user);
       }
       return true;
     } catch (err) {
-      setAuthError(friendlyAuthError(err));
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/account-exists-with-different-credential') {
+        const pendingCred = GoogleAuthProvider.credentialFromError(err as never);
+        const conflictEmail = (err as { customData?: { email?: string } })?.customData?.email || '';
+        if (pendingCred && conflictEmail) {
+          setPendingGoogleLink({ email: conflictEmail, credential: pendingCred });
+        }
+      }
+      setAuthError(friendlyAuthError(err, 'google'));
       return false;
     } finally {
       setSigningIn(false);
+    }
+  }
+
+  async function completePendingGoogleLink(password: string): Promise<boolean> {
+    if (!pendingGoogleLink) return false;
+    setSigningIn(true);
+    setAuthError(null);
+    try {
+      const userCred = await signInWithEmailAndPassword(auth, pendingGoogleLink.email, password);
+      await linkWithCredential(userCred.user, pendingGoogleLink.credential);
+      await syncGoogleProfileMetadataIfNeeded(userCred.user);
+      setPendingGoogleLink(null);
+      return true;
+    } catch (err) {
+      setAuthError(friendlyAuthError(err, 'email'));
+      return false;
+    } finally {
+      setSigningIn(false);
+    }
+  }
+
+  async function linkGoogleToCurrentUser(): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Sign in before linking a Google account.');
+    }
+    try {
+      const result = await linkWithPopup(auth.currentUser, googleProvider);
+      await syncGoogleProfileMetadataIfNeeded(result.user);
+      setFirebaseUser({ ...result.user } as User);
+      await pushNotification({
+        userId: result.user.uid,
+        actorId: result.user.uid,
+        type: 'security_alert',
+        title: 'Google Account Linked',
+        body: 'You can now sign in to your SWAS TASKS account using Google.',
+        linkRoute: 'security',
+      });
+    } catch (err) {
+      throw new Error(friendlyAuthError(err, 'google'));
     }
   }
 
@@ -219,23 +317,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const cred = await createUserWithEmailAndPassword(auth, params.email.trim(), params.password);
       await updateProfile(cred.user, { displayName: params.displayName.trim() });
       await sendEmailVerification(cred.user);
+      setEmailAuthUnavailable(false);
       return true;
     } catch (err) {
-      setAuthError(friendlyAuthError(err));
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+        setEmailAuthUnavailable(true);
+      }
+      clearPendingOnboarding();
+      setAuthError(friendlyAuthError(err, 'email'));
       return false;
     } finally {
       setSigningIn(false);
     }
   }
 
-  async function loginWithEmail(email: string, password: string): Promise<boolean> {
+  async function loginWithEmail(
+    email: string,
+    password: string,
+    rememberMe = true
+  ): Promise<boolean> {
     setSigningIn(true);
     setAuthError(null);
     try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
       await signInWithEmailAndPassword(auth, email.trim(), password);
+      setEmailAuthUnavailable(false);
       return true;
     } catch (err) {
-      setAuthError(friendlyAuthError(err));
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+        setEmailAuthUnavailable(true);
+      }
+      setAuthError(friendlyAuthError(err, 'email'));
       return false;
     } finally {
       setSigningIn(false);
@@ -249,7 +363,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await sendPasswordResetEmail(auth, email.trim());
       return true;
     } catch (err) {
-      setAuthError(friendlyAuthError(err));
+      const code = (err as { code?: string })?.code;
+      if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+        setEmailAuthUnavailable(true);
+      }
+      setAuthError(friendlyAuthError(err, 'email'));
       return false;
     } finally {
       setSigningIn(false);
@@ -285,7 +403,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         linkRoute: 'security',
       });
     } catch (err) {
-      throw new Error(friendlyAuthError(err));
+      throw new Error(friendlyAuthError(err, 'email'));
     }
   }
 
@@ -331,6 +449,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function logout(): Promise<void> {
     clearPendingOnboarding();
+    setPendingGoogleLink(null);
+    setAuthError(null);
     await signOut(auth);
   }
 
@@ -345,8 +465,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         authReady,
         signingIn,
         authError,
+        emailAuthUnavailable,
+        pendingGoogleLink,
         clearAuthError: () => setAuthError(null),
+        clearPendingGoogleLink: () => setPendingGoogleLink(null),
         signInWithGoogle,
+        completePendingGoogleLink,
+        linkGoogleToCurrentUser,
         registerWithEmail,
         loginWithEmail,
         resetPassword,

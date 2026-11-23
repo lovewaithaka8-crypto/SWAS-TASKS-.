@@ -78,6 +78,9 @@ export async function createUserAccountDocs(
   const safeName = cleanText(rawName, SCHEMA_LIMITS.displayNameMax);
   const displayName = safeName.length >= 2 ? safeName : 'SWAS Member';
   const email = cleanText(user.email || '', 254);
+  if (!email || email.length < 3) {
+    throw new Error('A verified email address from your account provider is required.');
+  }
 
   const userRef = doc(db, 'users', user.uid);
   const pubRef = doc(db, 'publicProfiles', user.uid);
@@ -132,6 +135,33 @@ export async function createUserAccountDocs(
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+  }
+}
+
+export async function syncGoogleProfileMetadataIfNeeded(user: User): Promise<void> {
+  if (!user.photoURL) return;
+  const userRef = doc(db, 'users', user.uid);
+  const pubRef = doc(db, 'publicProfiles', user.uid);
+  try {
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) return;
+    const data = snap.data() as UserPrivate;
+    if (data.photoUrl) return;
+    const safePhoto = cleanText(user.photoURL, 500);
+    if (!safePhoto) return;
+
+    const batch = writeBatch(db);
+    batch.update(userRef, {
+      photoUrl: safePhoto,
+      updatedAt: serverTimestamp(),
+    });
+    batch.update(pubRef, {
+      photoUrl: safePhoto,
+      updatedAt: serverTimestamp(),
+    });
+    await batch.commit();
+  } catch {
+    // Non-critical metadata backfill; do not block sign-in if skipped
   }
 }
 

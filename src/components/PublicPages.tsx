@@ -43,10 +43,16 @@ export function PublicPages({
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'highest' | 'lowest'>('newest');
+  const [preferredSignupRole, setPreferredSignupRole] = useState<UserRole>('client');
 
   const handleCategoryPick = (cat: TaskCategory) => {
     setSelectedCategory(cat);
     onNavigate('tasks');
+  };
+
+  const handleStartWithRole = (role: UserRole) => {
+    setPreferredSignupRole(role);
+    onNavigate('signup');
   };
 
   if (route === 'home') {
@@ -55,6 +61,7 @@ export function PublicPages({
         tasks={tasks}
         tasksLoading={tasksLoading}
         onNavigate={onNavigate}
+        onStartWithRole={handleStartWithRole}
         onSelectTask={onSelectTask}
         onCategoryPick={handleCategoryPick}
       />
@@ -80,7 +87,13 @@ export function PublicPages({
   }
   if (route === 'contact') return <PublicContactView onNavigate={onNavigate} />;
   if (route === 'login' || route === 'signup' || route === 'forgot-password') {
-    return <AuthView mode={route} onNavigate={onNavigate} />;
+    return (
+      <AuthView
+        mode={route}
+        initialRole={preferredSignupRole}
+        onNavigate={onNavigate}
+      />
+    );
   }
   if (route === 'terms' || route === 'privacy' || route === 'refund') {
     return <PolicyView kind={route} onNavigate={onNavigate} />;
@@ -93,12 +106,14 @@ function HomeView({
   tasks,
   tasksLoading,
   onNavigate,
+  onStartWithRole,
   onSelectTask,
   onCategoryPick,
 }: {
   tasks: MarketplaceTask[];
   tasksLoading: boolean;
   onNavigate: (route: AppRoute) => void;
+  onStartWithRole: (role: UserRole) => void;
   onSelectTask: (task: MarketplaceTask) => void;
   onCategoryPick: (cat: TaskCategory) => void;
 }) {
@@ -227,7 +242,7 @@ function HomeView({
             <div className="mt-6">
               <button
                 type="button"
-                onClick={() => onNavigate(firebaseUser ? 'dashboard' : 'signup')}
+                onClick={() => (firebaseUser ? onNavigate('dashboard') : onStartWithRole('client'))}
                 className="px-4 py-2 swas-btn-text text-[#1265c8] hover:text-[#0d4fa5] bg-[#e9f2ff] rounded-[9px] hover:bg-[#dcebff] transition whitespace-nowrap shrink-0 cursor-pointer"
               >
                 Start as a Client
@@ -257,7 +272,7 @@ function HomeView({
             <div className="mt-6">
               <button
                 type="button"
-                onClick={() => onNavigate(firebaseUser ? 'dashboard' : 'signup')}
+                onClick={() => (firebaseUser ? onNavigate('dashboard') : onStartWithRole('worker'))}
                 className="px-4 py-2 swas-btn-text text-[#1265c8] hover:text-[#0d4fa5] bg-[#e9f2ff] rounded-[9px] hover:bg-[#dcebff] transition whitespace-nowrap shrink-0 cursor-pointer"
               >
                 Start as a Worker
@@ -631,33 +646,68 @@ function PublicContactView({ onNavigate }: { onNavigate: (route: AppRoute) => vo
   );
 }
 
+function GoogleLogo() {
+  return (
+    <svg className="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+      />
+    </svg>
+  );
+}
+
 function AuthView({
   mode,
+  initialRole,
   onNavigate,
 }: {
   mode: 'login' | 'signup' | 'forgot-password';
+  initialRole: UserRole;
   onNavigate: (route: AppRoute) => void;
 }) {
   const {
     signInWithGoogle,
+    completePendingGoogleLink,
+    clearPendingGoogleLink,
+    pendingGoogleLink,
     registerWithEmail,
     loginWithEmail,
     resetPassword,
     signingIn,
     authError,
+    emailAuthUnavailable,
     clearAuthError,
   } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [businessName, setBusinessName] = useState('');
-  const [role, setRole] = useState<UserRole>('worker');
+  const [role, setRole] = useState<UserRole>(initialRole);
+  const [linkPassword, setLinkPassword] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setNotice(null);
+    setLocalError(null);
+    clearAuthError();
 
     if (mode === 'forgot-password') {
       const ok = await resetPassword(email);
@@ -670,8 +720,13 @@ function AuthView({
     }
 
     if (mode === 'login') {
-      const ok = await loginWithEmail(email, password);
+      const ok = await loginWithEmail(email, password, rememberMe);
       if (ok) onNavigate('dashboard');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setLocalError('Passwords do not match. Please confirm your password.');
       return;
     }
 
@@ -688,11 +743,32 @@ function AuthView({
   };
 
   const handleGoogle = async () => {
+    setLocalError(null);
+    setNotice(null);
     const ok = await signInWithGoogle(
-      mode === 'signup' ? { role, displayName: displayName.trim() || undefined, businessName } : undefined
+      mode === 'signup'
+        ? {
+            role,
+            displayName: displayName.trim() || undefined,
+            businessName: role === 'client' ? businessName.trim() || undefined : undefined,
+          }
+        : undefined,
+      rememberMe
     );
     if (ok) onNavigate('dashboard');
   };
+
+  const handleCompleteLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLocalError(null);
+    const ok = await completePendingGoogleLink(linkPassword);
+    if (ok) {
+      setLinkPassword('');
+      onNavigate('dashboard');
+    }
+  };
+
+  const displayError = localError || authError;
 
   return (
     <div className="max-w-md mx-auto px-5 pt-10">
@@ -701,7 +777,7 @@ function AuthView({
           <ShieldCheck className="w-4 h-4" />
           <span>
             {mode === 'signup'
-              ? 'Create Account'
+              ? 'SWAS TASKS Registration'
               : mode === 'forgot-password'
               ? 'Reset Password'
               : 'Workspace Sign In'}
@@ -709,20 +785,22 @@ function AuthView({
         </div>
         <h1 className="swas-heading-page">
           {mode === 'signup'
-            ? 'Join SWAS TASKS'
+            ? 'Create Your SWAS TASKS Account'
             : mode === 'forgot-password'
             ? 'Recover your password'
             : 'Sign in to SWAS TASKS'}
         </h1>
         <p className="mt-1.5 swas-desc">
           {mode === 'forgot-password'
-            ? 'Enter your account email and we will send a Firebase password reset link.'
-            : 'Access your role-specific Worker or Client workspace.'}
+            ? 'Enter your account email and we will send a password reset link.'
+            : mode === 'signup'
+            ? 'Set up your SWAS TASKS client or worker workspace account.'
+            : 'Access your SWAS TASKS client or worker dashboard securely.'}
         </p>
 
-        {authError && (
+        {displayError && (
           <div className="mt-4 p-3.5 rounded-lg bg-[#fff0f0] border border-[#f1c7c7] text-[13px] text-[#d34552] leading-relaxed">
-            {authError}
+            {displayError}
           </div>
         )}
 
@@ -733,153 +811,242 @@ function AuthView({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-          {mode === 'signup' && (
-            <>
-              <div>
-                <span className="block swas-label mb-1.5">Account Role</span>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setRole('worker')}
-                    className={`py-2.5 px-3 text-left rounded-[9px] border transition cursor-pointer ${
-                      role === 'worker'
-                        ? 'bg-[#e9f2ff] border-[#1265c8] text-[#172b46]'
-                        : 'bg-[#f9fbfe] border-[#d7e2ef] text-[#42556f]'
-                    }`}
-                  >
-                    <span className="block text-[13px] font-semibold">I am a Worker</span>
-                    <span className="block swas-desc">Bid & deliver tasks</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRole('client')}
-                    className={`py-2.5 px-3 text-left rounded-[9px] border transition cursor-pointer ${
-                      role === 'client'
-                        ? 'bg-[#e9f2ff] border-[#1265c8] text-[#172b46]'
-                        : 'bg-[#f9fbfe] border-[#d7e2ef] text-[#42556f]'
-                    }`}
-                  >
-                    <span className="block text-[13px] font-semibold">I am a Client</span>
-                    <span className="block swas-desc">Post tasks & hire</span>
-                  </button>
-                </div>
+        {pendingGoogleLink ? (
+          <form onSubmit={handleCompleteLink} className="mt-5 space-y-4">
+            <div className="p-3.5 rounded-[10px] bg-[#e9f2ff] border border-[#b7cff0] text-[13px] text-[#172b46] leading-relaxed">
+              Confirm your existing SWAS TASKS password for{' '}
+              <strong className="font-semibold">{pendingGoogleLink.email}</strong> to link Google Sign-In to your account without creating a duplicate profile.
+            </div>
+            <div>
+              <label htmlFor="link-pass" className="block swas-label mb-1.5">
+                Existing SWAS TASKS Password
+              </label>
+              <input
+                id="link-pass"
+                type="password"
+                required
+                value={linkPassword}
+                onChange={(e) => setLinkPassword(e.target.value)}
+                placeholder="Enter your existing password"
+                className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
+              />
+            </div>
+            <div className="flex gap-2.5">
+              <button
+                type="submit"
+                disabled={signingIn}
+                className="flex-1 py-2.5 px-4 swas-btn-primary swas-btn-text rounded-[9px] disabled:opacity-60 cursor-pointer"
+              >
+                {signingIn ? 'Linking...' : 'Verify & Link Google'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearPendingGoogleLink();
+                  clearAuthError();
+                  setLinkPassword('');
+                }}
+                className="px-4 py-2.5 bg-white border border-[#dce5f0] text-[#42556f] swas-btn-text rounded-[9px] hover:bg-[#f3f6fa] cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            {mode !== 'forgot-password' && (
+              <div className="mt-4 p-3 rounded-[9px] bg-[#f7faff] border border-[#dce5f0] text-[12px] text-[#42556f] leading-relaxed">
+                {emailAuthUnavailable
+                  ? 'Email and password authentication is temporarily unavailable while our team completes setup. Please use Continue with Google below.'
+                  : 'Email & password sign-in is currently being finalized by our development team. If unavailable, use Continue with Google below for instant access.'}
               </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+              {mode === 'signup' && (
+                <>
+                  <div>
+                    <span className="block swas-label mb-1.5">Account Type</span>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setRole('client')}
+                        className={`py-2.5 px-3 text-left rounded-[9px] border transition cursor-pointer ${
+                          role === 'client'
+                            ? 'bg-[#e9f2ff] border-[#1265c8] text-[#172b46]'
+                            : 'bg-[#f9fbfe] border-[#d7e2ef] text-[#42556f]'
+                        }`}
+                      >
+                        <span className="block text-[13px] font-semibold">I am a Client</span>
+                        <span className="block swas-desc">Post tasks & hire</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRole('worker')}
+                        className={`py-2.5 px-3 text-left rounded-[9px] border transition cursor-pointer ${
+                          role === 'worker'
+                            ? 'bg-[#e9f2ff] border-[#1265c8] text-[#172b46]'
+                            : 'bg-[#f9fbfe] border-[#d7e2ef] text-[#42556f]'
+                        }`}
+                      >
+                        <span className="block text-[13px] font-semibold">I am a Worker</span>
+                        <span className="block swas-desc">Bid & deliver tasks</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="auth-name" className="block swas-label mb-1.5">
+                      Full Name
+                    </label>
+                    <input
+                      id="auth-name"
+                      type="text"
+                      required
+                      minLength={2}
+                      maxLength={80}
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="e.g., Amina Ochieng"
+                      className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
+                    />
+                  </div>
+
+                  {role === 'client' && (
+                    <div>
+                      <label htmlFor="auth-biz" className="block swas-label mb-1.5">
+                        Business / Organization Name (Optional)
+                      </label>
+                      <input
+                        id="auth-biz"
+                        type="text"
+                        maxLength={100}
+                        value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)}
+                        placeholder="e.g., Savanna Logistics Ltd"
+                        className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
 
               <div>
-                <label htmlFor="auth-name" className="block swas-label mb-1.5">
-                  Full Name
+                <label htmlFor="auth-email" className="block swas-label mb-1.5">
+                  Email Address
                 </label>
                 <input
-                  id="auth-name"
-                  type="text"
+                  id="auth-email"
+                  type="email"
                   required
-                  minLength={2}
-                  maxLength={80}
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g., Amina Ochieng"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
                   className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
                 />
               </div>
 
-              {role === 'client' && (
+              {mode !== 'forgot-password' && (
                 <div>
-                  <label htmlFor="auth-biz" className="block swas-label mb-1.5">
-                    Business / Organization Name (Optional)
+                  <label htmlFor="auth-pass" className="block swas-label mb-1.5">
+                    Password
                   </label>
                   <input
-                    id="auth-biz"
-                    type="text"
-                    maxLength={100}
-                    value={businessName}
-                    onChange={(e) => setBusinessName(e.target.value)}
-                    placeholder="e.g., Savanna Logistics Ltd"
+                    id="auth-pass"
+                    type="password"
+                    required
+                    minLength={6}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
                     className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
                   />
                 </div>
               )}
-            </>
-          )}
 
-          <div>
-            <label htmlFor="auth-email" className="block swas-label mb-1.5">
-              Email Address
-            </label>
-            <input
-              id="auth-email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
-            />
-          </div>
+              {mode === 'signup' && (
+                <div>
+                  <label htmlFor="auth-confirm-pass" className="block swas-label mb-1.5">
+                    Confirm Password
+                  </label>
+                  <input
+                    id="auth-confirm-pass"
+                    type="password"
+                    required
+                    minLength={6}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Re-enter your password"
+                    className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
+                  />
+                </div>
+              )}
 
-          {mode !== 'forgot-password' && (
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="auth-pass" className="block swas-label">
-                  Password
-                </label>
-                {mode === 'login' && (
+              {mode === 'login' && (
+                <div className="flex items-center justify-between gap-2">
+                  <label className="inline-flex items-center gap-2 text-[13px] text-[#42556f] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="w-4 h-4 rounded border-[#d7e2ef] text-[#1265c8] focus:ring-[#1265c8]"
+                    />
+                    <span>Remember Me</span>
+                  </label>
                   <button
                     type="button"
                     onClick={() => {
                       clearAuthError();
+                      setLocalError(null);
                       onNavigate('forgot-password');
                     }}
                     className="text-[12px] font-semibold swas-link hover:underline cursor-pointer"
                   >
-                    Forgot password?
+                    Forgot Password?
                   </button>
-                )}
-              </div>
-              <input
-                id="auth-pass"
-                type="password"
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 6 characters"
-                className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
-              />
-            </div>
-          )}
+                </div>
+              )}
 
-          <button
-            type="submit"
-            disabled={signingIn}
-            className="w-full py-2.5 px-4 swas-btn-primary swas-btn-text rounded-[9px] disabled:opacity-60 cursor-pointer"
-          >
-            {signingIn
-              ? 'Please wait...'
-              : mode === 'signup'
-              ? 'Create Account'
-              : mode === 'forgot-password'
-              ? 'Send Reset Link'
-              : 'Sign In'}
-          </button>
-        </form>
+              <button
+                type="submit"
+                disabled={signingIn}
+                className="w-full py-2.5 px-4 swas-btn-primary swas-btn-text rounded-[9px] disabled:opacity-60 cursor-pointer"
+              >
+                {signingIn
+                  ? 'Please wait...'
+                  : mode === 'signup'
+                  ? 'Create Account'
+                  : mode === 'forgot-password'
+                  ? 'Send Reset Link'
+                  : 'Sign In'}
+              </button>
+            </form>
 
-        {mode !== 'forgot-password' && (
-          <>
-            <div className="my-5 flex items-center gap-3">
-              <div className="flex-1 h-px bg-[#e1e8f2]" />
-              <span className="swas-meta">OR</span>
-              <div className="flex-1 h-px bg-[#e1e8f2]" />
-            </div>
+            {mode !== 'forgot-password' && (
+              <>
+                <div className="my-5 flex items-center gap-3">
+                  <div className="flex-1 h-px bg-[#e1e8f2]" />
+                  <span className="text-[11px] font-semibold tracking-wider text-[#75869d]">OR</span>
+                  <div className="flex-1 h-px bg-[#e1e8f2]" />
+                </div>
 
-            <button
-              type="button"
-              disabled={signingIn}
-              onClick={handleGoogle}
-              className="w-full py-2.5 px-4 bg-white border border-[#dce5f0] text-[#172b46] swas-btn-text rounded-[9px] hover:bg-[#e9f2ff] disabled:opacity-60 transition cursor-pointer"
-            >
-              Continue with Google
-            </button>
+                <button
+                  type="button"
+                  disabled={signingIn}
+                  onClick={handleGoogle}
+                  className="w-full py-2.5 px-4 bg-white border border-[#dce5f0] text-[#172b46] swas-btn-text rounded-[9px] shadow-[0_1px_3px_rgba(16,43,80,0.06)] hover:bg-[#f8fbff] hover:border-[#b7cff0] disabled:opacity-60 transition inline-flex items-center justify-center gap-2.5 cursor-pointer"
+                >
+                  <GoogleLogo />
+                  <span>{signingIn ? 'Connecting to Google...' : 'Continue with Google'}</span>
+                </button>
+
+                <p className="mt-3 text-center swas-desc leading-relaxed">
+                  {mode === 'signup'
+                    ? 'Having trouble creating an account with your email and password? Continue with Google for an easier sign-up experience.'
+                    : 'You can also securely access your SWAS TASKS account using your Google account.'}
+                </p>
+              </>
+            )}
           </>
         )}
 
@@ -891,6 +1058,8 @@ function AuthView({
                 type="button"
                 onClick={() => {
                   clearAuthError();
+                  clearPendingGoogleLink();
+                  setLocalError(null);
                   onNavigate('login');
                 }}
                 className="swas-link font-semibold hover:underline cursor-pointer"
@@ -905,11 +1074,13 @@ function AuthView({
                 type="button"
                 onClick={() => {
                   clearAuthError();
+                  clearPendingGoogleLink();
+                  setLocalError(null);
                   onNavigate('signup');
                 }}
                 className="swas-link font-semibold hover:underline cursor-pointer"
               >
-                Register here
+                Create Your Account
               </button>
             </>
           )}

@@ -159,7 +159,7 @@ function EmailVerificationGate({ onSignOut }: { onSignOut: () => void }) {
 
 function RoleOnboardingGate() {
   const { firebaseUser, completeOnboarding, logout } = useAuth();
-  const [role, setRole] = useState<UserRole>('worker');
+  const [role, setRole] = useState<UserRole>('client');
   const [displayName, setDisplayName] = useState(firebaseUser?.displayName || '');
   const [businessName, setBusinessName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -206,18 +206,6 @@ function RoleOnboardingGate() {
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => setRole('worker')}
-              className={`p-3.5 text-left rounded-[10px] border cursor-pointer ${
-                role === 'worker'
-                  ? 'bg-[#e9f2ff] border-[#1265c8] text-[#172b46]'
-                  : 'bg-[#f9fbfe] border-[#d7e2ef] text-[#42556f]'
-              }`}
-            >
-              <span className="block text-[14px] font-semibold">Worker</span>
-              <span className="block swas-desc mt-0.5">Bid & complete tasks</span>
-            </button>
-            <button
-              type="button"
               onClick={() => setRole('client')}
               className={`p-3.5 text-left rounded-[10px] border cursor-pointer ${
                 role === 'client'
@@ -227,6 +215,18 @@ function RoleOnboardingGate() {
             >
               <span className="block text-[14px] font-semibold">Client</span>
               <span className="block swas-desc mt-0.5">Post briefs & hire</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setRole('worker')}
+              className={`p-3.5 text-left rounded-[10px] border cursor-pointer ${
+                role === 'worker'
+                  ? 'bg-[#e9f2ff] border-[#1265c8] text-[#172b46]'
+                  : 'bg-[#f9fbfe] border-[#d7e2ef] text-[#42556f]'
+              }`}
+            >
+              <span className="block text-[14px] font-semibold">Worker</span>
+              <span className="block swas-desc mt-0.5">Bid & complete tasks</span>
             </button>
           </div>
 
