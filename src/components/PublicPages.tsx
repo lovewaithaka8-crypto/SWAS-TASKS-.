@@ -634,6 +634,16 @@ function PublicContactView({ onNavigate }: { onNavigate: (route: AppRoute) => vo
         <p className="swas-body">
           All support inquiries are linked directly to your verified workspace account so our operations team can trace task IDs, bids, and KES ledger references accurately.
         </p>
+        <div className="p-4 rounded-[10px] bg-[#f7faff] border border-[#dce5f0] space-y-1">
+          <span className="block swas-desc">Official SWAS TASKS Email</span>
+          <a
+            href="mailto:swastaskorg@gmail.com"
+            className="text-[15px] font-bold text-[#1265c8] hover:underline"
+          >
+            swastaskorg@gmail.com
+          </a>
+          <p className="swas-meta">Sender Display Name: SWAS TASKS · Reply-To: swastaskorg@gmail.com</p>
+        </div>
         <button
           type="button"
           onClick={() => onNavigate(firebaseUser ? 'support' : 'login')}
@@ -1131,6 +1141,12 @@ function PolicyView({
             {p}
           </p>
         ))}
+        <p className="swas-desc pt-2 border-t border-[#e1e8f2]">
+          Official correspondence and policy inquiries:{' '}
+          <a href="mailto:swastaskorg@gmail.com" className="swas-link font-semibold hover:underline">
+            swastaskorg@gmail.com
+          </a>
+        </p>
         <div className="pt-4">
           <button
             type="button"

@@ -25,6 +25,8 @@ import {
   Search,
   Settings,
   Shield,
+  ShieldAlert,
+  SlidersHorizontal,
   User,
   Wallet,
   X,
@@ -33,7 +35,9 @@ import {
 import { useAuth } from '../context/AuthContext';
 import type {
   AppNotification,
+  CentralEmailSettings,
   Conversation,
+  EmailDeliveryLog,
   LedgerTransaction,
   MarketplaceTask,
   SavedTaskItem,
@@ -45,6 +49,7 @@ import type {
   WorkspaceRoute,
 } from '../types/marketplace';
 import { ClientPages } from './ClientPages';
+import { ControlCentrePages } from './ControlCentrePages';
 import { SharedWorkspacePages } from './SharedWorkspacePages';
 import { WorkerPages } from './WorkerPages';
 
@@ -77,6 +82,8 @@ interface WorkspaceShellProps {
   onSelectConversation: (id: string | null) => void;
   notifications: AppNotification[];
   supportTickets: SupportTicket[];
+  emailSettings: CentralEmailSettings;
+  emailLogs: EmailDeliveryLog[];
   onNavigate: (route: WorkspaceRoute) => void;
   onSelectTask: (task: MarketplaceTask) => void;
   onOpenChat: (conversationId: string) => void;
@@ -106,6 +113,8 @@ const ROUTE_META: Record<WorkspaceRoute, { title: string; section: string }> = {
   profile: { title: 'My Profile', section: 'Account' },
   settings: { title: 'Account Settings', section: 'Account' },
   security: { title: 'Security Settings', section: 'Account' },
+  'control-centre': { title: 'Central Control Centre', section: 'Control Centre' },
+  'platform-settings': { title: 'Platform Email Settings', section: 'Control Centre' },
 };
 
 export function WorkspaceShell({
@@ -125,13 +134,15 @@ export function WorkspaceShell({
   onSelectConversation,
   notifications,
   supportTickets,
+  emailSettings,
+  emailLogs,
   onNavigate,
   onSelectTask,
   onOpenChat,
   onNavigatePublicHome,
   onSignOut,
 }: WorkspaceShellProps) {
-  const { firebaseUser, userPrivate } = useAuth();
+  const { firebaseUser, userPrivate, isSuperAdmin } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -166,7 +177,7 @@ export function WorkspaceShell({
           { route: 'completed-projects', label: 'Completed Projects', icon: FileCheck2 },
         ];
 
-    return [
+    const groups: NavGroup[] = [
       {
         heading: 'DASHBOARD',
         items: [{ route: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }],
@@ -211,7 +222,19 @@ export function WorkspaceShell({
         ],
       },
     ];
-  }, [isWorker, unreadMsgCount, unreadNotifCount]);
+
+    if (isSuperAdmin) {
+      groups.push({
+        heading: 'CENTRAL CONTROL CENTRE',
+        items: [
+          { route: 'control-centre', label: 'Control Centre', icon: ShieldAlert },
+          { route: 'platform-settings', label: 'Platform Email Settings', icon: SlidersHorizontal },
+        ],
+      });
+    }
+
+    return groups;
+  }, [isWorker, isSuperAdmin, unreadMsgCount, unreadNotifCount]);
 
   const mobileTabs: NavEntry[] = useMemo(
     () =>
@@ -251,6 +274,9 @@ export function WorkspaceShell({
       onNavigate('manage-tasks');
     }
   };
+
+  const isControlCentreRoute =
+    route === 'control-centre' || route === 'platform-settings';
 
   const isSharedRoute =
     route === 'wallet' ||
@@ -522,7 +548,14 @@ export function WorkspaceShell({
 
         {/* Workspace Viewport with safe bottom clearance for mobile floating dock */}
         <main className="flex-1 p-4 md:p-6 lg:p-8 pb-28 lg:pb-10 max-w-[1400px] w-full mx-auto">
-          {isSharedRoute ? (
+          {isControlCentreRoute ? (
+            <ControlCentrePages
+              route={route}
+              emailSettings={emailSettings}
+              emailLogs={emailLogs}
+              onNavigate={onNavigate}
+            />
+          ) : isSharedRoute ? (
             <SharedWorkspacePages
               route={route}
               wallet={wallet}

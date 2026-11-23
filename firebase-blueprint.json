@@ -724,6 +724,68 @@
         }
       },
       "required": ["userId", "senderName", "category", "subject", "message", "status", "createdAt"]
+    },
+    "CentralEmailSettings": {
+      "title": "CentralEmailSettings",
+      "description": "Super Administrator central email sender identity, DNS verification guidance, and category toggles.",
+      "type": "object",
+      "properties": {
+        "platformName": { "type": "string", "enum": ["SWAS TASKS"] },
+        "senderEmail": { "type": "string", "enum": ["swastaskorg@gmail.com"] },
+        "senderName": { "type": "string", "enum": ["SWAS TASKS"] },
+        "replyToEmail": { "type": "string", "enum": ["swastaskorg@gmail.com"] },
+        "spfStatusLabel": { "type": "string", "maxLength": 120 },
+        "dkimStatusLabel": { "type": "string", "maxLength": 120 },
+        "dmarcStatusLabel": { "type": "string", "maxLength": 120 },
+        "enabledCategories": { "type": "object" },
+        "subjectTemplates": { "type": "object" },
+        "updatedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "platformName",
+        "senderEmail",
+        "senderName",
+        "replyToEmail",
+        "spfStatusLabel",
+        "dkimStatusLabel",
+        "dmarcStatusLabel",
+        "enabledCategories",
+        "subjectTemplates",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "EmailDeliveryLog": {
+      "title": "EmailDeliveryLog",
+      "description": "Immutable delivery audit log for outgoing SWAS TASKS emails.",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "surface": { "type": "string", "enum": ["website", "control_centre"] },
+        "category": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "recipientEmail": { "type": "string", "format": "email", "minLength": 3, "maxLength": 254 },
+        "senderEmail": { "type": "string", "enum": ["swastaskorg@gmail.com"] },
+        "senderName": { "type": "string", "enum": ["SWAS TASKS"] },
+        "replyToEmail": { "type": "string", "enum": ["swastaskorg@gmail.com"] },
+        "subject": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "status": { "type": "string", "enum": ["sent", "failed", "not_configured"] },
+        "providerMessageId": { "type": "string", "maxLength": 200 },
+        "errorMessage": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "actorId",
+        "surface",
+        "category",
+        "recipientEmail",
+        "senderEmail",
+        "senderName",
+        "replyToEmail",
+        "subject",
+        "status",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -778,6 +840,14 @@
     "/supportTickets/{ticketId}": {
       "schema": { "$ref": "#/entities/SupportTicket" },
       "description": "Authenticated user support tickets."
+    },
+    "/emailSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/CentralEmailSettings" },
+      "description": "Super Admin central email configuration (non-secret identity and templates)."
+    },
+    "/emailLogs/{logId}": {
+      "schema": { "$ref": "#/entities/EmailDeliveryLog" },
+      "description": "Immutable outgoing email delivery and failure audit logs."
     }
   }
 }

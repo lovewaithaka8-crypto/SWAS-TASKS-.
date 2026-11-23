@@ -15,7 +15,8 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { dispatchPlatformEmail } from './emailService';
 import {
   cleanText,
   SCHEMA_LIMITS,
@@ -408,6 +409,18 @@ export async function createTask(
 
   try {
     await setDoc(doc(db, 'tasks', taskId), payload);
+    if (auth.currentUser?.email) {
+      void dispatchPlatformEmail({
+        user: auth.currentUser,
+        surface: 'website',
+        category: 'task_notification',
+        recipientEmail: auth.currentUser.email,
+        subject: `[SWAS TASKS] Task Published: ${payload.title}`,
+        bodyText: `Your task "${payload.title}" (${input.category}, KES ${Math.round(
+          input.budgetKes
+        ).toLocaleString('en-KE')}) has been published on SWAS TASKS.`,
+      });
+    }
     return taskId;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `tasks/${taskId}`);
@@ -556,6 +569,19 @@ export async function submitBid(
       linkRoute: 'received-bids',
     });
 
+    if (auth.currentUser?.email) {
+      void dispatchPlatformEmail({
+        user: auth.currentUser,
+        surface: 'website',
+        category: 'bid_assignment_notification',
+        recipientEmail: auth.currentUser.email,
+        subject: `[SWAS TASKS] Bid Submitted: ${task.title}`,
+        bodyText: `Your bid of KES ${Math.round(input.amountKes).toLocaleString(
+          'en-KE'
+        )} (${Math.trunc(input.deliveryDays)} days) for "${task.title}" has been submitted.`,
+      });
+    }
+
     return bidId;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `bids/${bidId}`);
@@ -587,6 +613,16 @@ export async function rejectBid(bid: TaskBid, clientId: string): Promise<void> {
       body: `Your bid on "${bid.taskTitle}" was declined by the client.`,
       linkRoute: 'my-bids',
     });
+    if (auth.currentUser?.email) {
+      void dispatchPlatformEmail({
+        user: auth.currentUser,
+        surface: 'website',
+        category: 'bid_assignment_notification',
+        recipientEmail: auth.currentUser.email,
+        subject: `[SWAS TASKS] Bid Declined: ${bid.taskTitle}`,
+        bodyText: `You declined ${bid.workerName}'s bid on "${bid.taskTitle}".`,
+      });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `bids/${bid.id}`);
   }
@@ -650,6 +686,19 @@ export async function acceptBidAndCreateAssignment(
       body: `Your bid on "${bid.taskTitle}" (${bid.amountKes.toLocaleString('en-KE')} KES) was accepted.`,
       linkRoute: 'my-assignments',
     });
+
+    if (auth.currentUser?.email) {
+      void dispatchPlatformEmail({
+        user: auth.currentUser,
+        surface: 'website',
+        category: 'bid_assignment_notification',
+        recipientEmail: auth.currentUser.email,
+        subject: `[SWAS TASKS] Assignment Confirmed: ${bid.taskTitle}`,
+        bodyText: `You accepted ${bid.workerName}'s bid of KES ${bid.amountKes.toLocaleString(
+          'en-KE'
+        )} for "${bid.taskTitle}". Assignment ID: ${assignmentId}.`,
+      });
+    }
 
     return assignmentId;
   } catch (error) {
@@ -734,6 +783,16 @@ export async function submitAssignmentWork(
       body: `${assignment.workerName} submitted work for "${assignment.taskTitle}".`,
       linkRoute: 'active-projects',
     });
+    if (auth.currentUser?.email) {
+      void dispatchPlatformEmail({
+        user: auth.currentUser,
+        surface: 'website',
+        category: 'bid_assignment_notification',
+        recipientEmail: auth.currentUser.email,
+        subject: `[SWAS TASKS] Deliverable Submitted: ${assignment.taskTitle}`,
+        bodyText: `Your deliverable for "${assignment.taskTitle}" has been submitted for client review.`,
+      });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `assignments/${assignment.id}`);
   }
@@ -830,6 +889,18 @@ export async function approveAssignmentWork(
       body: `"${assignment.taskTitle}" was approved. KES ${assignment.agreedKes.toLocaleString('en-KE')} added to pending balance awaiting provider confirmation.`,
       linkRoute: 'wallet',
     });
+    if (auth.currentUser?.email) {
+      void dispatchPlatformEmail({
+        user: auth.currentUser,
+        surface: 'website',
+        category: 'payment_notification',
+        recipientEmail: auth.currentUser.email,
+        subject: `[SWAS TASKS] Work Approved & Payment Logged: ${assignment.taskTitle}`,
+        bodyText: `You approved deliverable work for "${assignment.taskTitle}". KES ${assignment.agreedKes.toLocaleString(
+          'en-KE'
+        )} has been logged in the ledger as pending settlement confirmation.`,
+      });
+    }
   } catch (error) {
     if (error instanceof Error && error.message.includes('Only submitted')) {
       throw error;

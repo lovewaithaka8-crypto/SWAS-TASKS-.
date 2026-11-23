@@ -13,6 +13,8 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { OFFICIAL_EMAIL_IDENTITY } from '../lib/emailConfig';
+import { dispatchPlatformEmail } from '../lib/emailService';
 import {
   createSupportTicket,
   markAllNotificationsRead,
@@ -166,7 +168,20 @@ function FinancePages({
         method: wdMethod,
         destination: wdDest,
       });
-      setWdSuccess('Withdrawal request logged for backend settlement processing.');
+      let emailNote = '';
+      if (firebaseUser.email) {
+        const emailRes = await dispatchPlatformEmail({
+          user: firebaseUser,
+          surface: 'website',
+          category: 'withdrawal_notification',
+          recipientEmail: firebaseUser.email,
+          bodyText: `Your withdrawal request of KES ${Number(wdAmount).toLocaleString('en-KE')} via ${wdMethod} (${wdDest}) has been logged on SWAS TASKS.`,
+        });
+        emailNote = emailRes.sent
+          ? ` Confirmation sent from ${OFFICIAL_EMAIL_IDENTITY.officialEmail}.`
+          : ' (Email confirmation skipped: EMAIL SERVICE NOT CONFIGURED)';
+      }
+      setWdSuccess(`Withdrawal request logged for backend settlement processing.${emailNote}`);
       setWdAmount('');
       setWdDest('');
     } catch (err) {
@@ -789,14 +804,28 @@ function SupportView({ supportTickets }: { supportTickets: SupportTicket[] }) {
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      await createSupportTicket({
+      const ticketId = await createSupportTicket({
         userId: firebaseUser.uid,
         senderName: userPrivate.displayName,
         category,
         subject,
         message,
       });
-      setSuccessMsg('Support ticket logged to your account.');
+      let emailNotice = '';
+      if (firebaseUser.email) {
+        const emailRes = await dispatchPlatformEmail({
+          user: firebaseUser,
+          surface: 'website',
+          category: 'customer_support',
+          recipientEmail: firebaseUser.email,
+          subject: `[SWAS TASKS] Support Ticket #${ticketId.slice(-6).toUpperCase()}: ${subject}`,
+          bodyText: `Hello ${userPrivate.displayName},\n\nWe received your support ticket under "${category}".\n\nSubject: ${subject}\nMessage: ${message}\n\nOur support team will respond from ${OFFICIAL_EMAIL_IDENTITY.officialEmail}.`,
+        });
+        emailNotice = emailRes.sent
+          ? ` Email acknowledgement sent from ${OFFICIAL_EMAIL_IDENTITY.officialEmail}.`
+          : ' (Email acknowledgement not sent: EMAIL SERVICE NOT CONFIGURED)';
+      }
+      setSuccessMsg(`Support ticket logged to your account.${emailNotice}`);
       setSubject('');
       setMessage('');
     } catch (err) {
@@ -814,7 +843,14 @@ function SupportView({ supportTickets }: { supportTickets: SupportTicket[] }) {
           <h3 className="swas-heading-section">Open a Support Ticket</h3>
         </div>
         <p className="swas-desc">
-          Include task IDs, assignment names, or KES ledger references so support can assist quickly.
+          Include task IDs, assignment names, or KES ledger references. Official support address:{' '}
+          <a
+            href={`mailto:${OFFICIAL_EMAIL_IDENTITY.officialEmail}`}
+            className="text-[#1265c8] font-semibold hover:underline"
+          >
+            {OFFICIAL_EMAIL_IDENTITY.officialEmail}
+          </a>
+          .
         </p>
 
         {successMsg && (

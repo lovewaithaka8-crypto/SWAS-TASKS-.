@@ -220,6 +220,55 @@ export type PublicRoute =
   | 'privacy'
   | 'refund';
 
+export type EmailDeliveryStatus = 'sent' | 'failed' | 'not_configured';
+
+export interface CentralEmailSettings {
+  id: string;
+  platformName: string;
+  senderEmail: string;
+  senderName: string;
+  replyToEmail: string;
+  spfStatusLabel: string;
+  dkimStatusLabel: string;
+  dmarcStatusLabel: string;
+  enabledCategories: Record<string, boolean>;
+  subjectTemplates: Record<string, string>;
+  updatedBy: string;
+  updatedAt?: Timestamp;
+}
+
+export interface EmailDeliveryLog {
+  id: string;
+  actorId: string;
+  surface: 'website' | 'control_centre';
+  category: string;
+  recipientEmail: string;
+  senderEmail: string;
+  senderName: string;
+  replyToEmail: string;
+  subject: string;
+  status: EmailDeliveryStatus;
+  providerMessageId?: string;
+  errorMessage?: string;
+  createdAt?: Timestamp;
+}
+
+export interface EmailServiceStatusResponse {
+  configured: boolean;
+  statusLabel: 'CONNECTED' | 'EMAIL SERVICE NOT CONFIGURED';
+  officialEmail: string;
+  senderName: string;
+  replyTo: string;
+  smtpHostLabel: string;
+  verificationStatus: 'verified' | 'unverified' | 'not_configured';
+  verificationDetail: string;
+  dnsGuidance: {
+    spf: string;
+    dkim: string;
+    dmarc: string;
+  };
+}
+
 export type WorkspaceRoute =
   | 'dashboard'
   // Worker routes
@@ -246,7 +295,10 @@ export type WorkspaceRoute =
   // Account
   | 'profile'
   | 'settings'
-  | 'security';
+  | 'security'
+  // Super Admin Control Centre
+  | 'control-centre'
+  | 'platform-settings';
 
 export type AppRoute = PublicRoute | WorkspaceRoute;
 
@@ -280,8 +332,14 @@ export const SHARED_WORKSPACE_ROUTES: WorkspaceRoute[] = [
   'security',
 ];
 
+export const ADMIN_ONLY_ROUTES: WorkspaceRoute[] = [
+  'control-centre',
+  'platform-settings',
+];
+
 export const ALL_WORKSPACE_ROUTES: WorkspaceRoute[] = [
   ...WORKER_ONLY_ROUTES,
   ...CLIENT_ONLY_ROUTES,
   ...SHARED_WORKSPACE_ROUTES,
+  ...ADMIN_ONLY_ROUTES,
 ];

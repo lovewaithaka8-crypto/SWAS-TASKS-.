@@ -313,6 +313,55 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidCentralEmailSettings(data) {
+      return data.keys().hasAll([
+          'platformName', 'senderEmail', 'senderName', 'replyToEmail',
+          'spfStatusLabel', 'dkimStatusLabel', 'dmarcStatusLabel',
+          'enabledCategories', 'subjectTemplates', 'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'platformName', 'senderEmail', 'senderName', 'replyToEmail',
+          'spfStatusLabel', 'dkimStatusLabel', 'dmarcStatusLabel',
+          'enabledCategories', 'subjectTemplates', 'updatedBy', 'updatedAt'
+        ])
+        && data.platformName == 'SWAS TASKS'
+        && data.senderEmail == 'swastaskorg@gmail.com'
+        && data.senderName == 'SWAS TASKS'
+        && data.replyToEmail == 'swastaskorg@gmail.com'
+        && data.spfStatusLabel is string && data.spfStatusLabel.size() >= 1 && data.spfStatusLabel.size() <= 120
+        && data.dkimStatusLabel is string && data.dkimStatusLabel.size() >= 1 && data.dkimStatusLabel.size() <= 120
+        && data.dmarcStatusLabel is string && data.dmarcStatusLabel.size() >= 1 && data.dmarcStatusLabel.size() <= 120
+        && data.enabledCategories is map && data.enabledCategories.size() <= 30
+        && data.subjectTemplates is map && data.subjectTemplates.size() <= 30
+        && isValidId(data.updatedBy)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEmailDeliveryLog(data) {
+      return data.keys().hasAll([
+          'actorId', 'surface', 'category', 'recipientEmail',
+          'senderEmail', 'senderName', 'replyToEmail',
+          'subject', 'status', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'actorId', 'surface', 'category', 'recipientEmail',
+          'senderEmail', 'senderName', 'replyToEmail',
+          'subject', 'status', 'providerMessageId', 'errorMessage', 'createdAt'
+        ])
+        && isValidId(data.actorId)
+        && data.surface in ['website', 'control_centre']
+        && data.category is string && data.category.size() >= 2 && data.category.size() <= 64
+        && data.recipientEmail is string && data.recipientEmail.size() >= 3 && data.recipientEmail.size() <= 254
+        && data.senderEmail == 'swastaskorg@gmail.com'
+        && data.senderName == 'SWAS TASKS'
+        && data.replyToEmail == 'swastaskorg@gmail.com'
+        && data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 200
+        && data.status in ['sent', 'failed', 'not_configured']
+        && (!('providerMessageId' in data) || (data.providerMessageId is string && data.providerMessageId.size() <= 200))
+        && (!('errorMessage' in data) || (data.errorMessage is string && data.errorMessage.size() <= 500))
+        && data.createdAt is timestamp;
+    }
+
     // --- Collection Rules ---
 
     match /admins/{adminId} {
@@ -663,6 +712,30 @@ service cloud.firestore {
         && isValidSupportTicket(incoming())
         && incoming().userId == request.auth.uid
         && incoming().status == 'open'
+        && incoming().createdAt == request.time;
+
+      allow update, delete: if false;
+    }
+
+    match /emailSettings/{settingId} {
+      allow get, list: if isAdmin();
+
+      allow create, update: if isAdmin()
+        && isValidId(settingId)
+        && isValidCentralEmailSettings(incoming())
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    match /emailLogs/{logId} {
+      allow get, list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidEmailDeliveryLog(incoming())
+        && incoming().actorId == request.auth.uid
         && incoming().createdAt == request.time;
 
       allow update, delete: if false;

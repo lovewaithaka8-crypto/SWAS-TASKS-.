@@ -20,8 +20,10 @@ import {
   type AuthCredential,
   type User,
 } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
+import { SUPER_ADMIN_EMAIL } from '../lib/emailConfig';
+import { dispatchPlatformEmail } from '../lib/emailService';
 import {
   createUserAccountDocs,
   pushNotification,
@@ -111,6 +113,7 @@ interface AuthContextValue {
   firebaseUser: User | null;
   userPrivate: UserPrivate | null;
   publicProfile: PublicProfile | null;
+  isSuperAdmin: boolean;
   profileLoaded: boolean;
   needsOnboarding: boolean;
   authReady: boolean;
@@ -145,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [userPrivate, setUserPrivate] = useState<UserPrivate | null>(null);
   const [publicProfile, setPublicProfile] = useState<PublicProfile | null>(null);
+  const [hasAdminDoc, setHasAdminDoc] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
@@ -159,6 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!user) {
         setUserPrivate(null);
         setPublicProfile(null);
+        setHasAdminDoc(false);
         setProfileLoaded(false);
       }
     });
@@ -211,11 +216,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
+    let cancelled = false;
+    getDoc(doc(db, 'admins', firebaseUser.uid))
+      .then((snap) => {
+        if (!cancelled) setHasAdminDoc(snap.exists());
+      })
+      .catch(() => {
+        if (!cancelled) setHasAdminDoc(false);
+      });
+
     return () => {
+      cancelled = true;
       unsubPrivate();
       unsubPublic();
     };
   }, [authReady, firebaseUser]);
+
+  const isSuperAdmin = Boolean(
+    firebaseUser?.emailVerified &&
+      (firebaseUser.email?.trim().toLowerCase() === SUPER_ADMIN_EMAIL || hasAdminDoc)
+  );
 
   const needsOnboarding = Boolean(
     authReady && firebaseUser && firebaseUser.emailVerified && profileLoaded && !userPrivate
@@ -240,8 +260,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           onboarding.businessName
         );
         clearPendingOnboarding();
+        if (cred.user.email) {
+          void dispatchPlatformEmail({
+            user: cred.user,
+            surface: 'website',
+            category:
+              onboarding.role === 'client' ? 'client_registration' : 'worker_registration',
+            recipientEmail: cred.user.email,
+            bodyText: `Welcome to SWAS TASKS! Your ${onboarding.role} workspace account is now active via Google Sign-In.`,
+          });
+        }
       } else if (cred.user.emailVerified) {
         await syncGoogleProfileMetadataIfNeeded(cred.user);
+        if (cred.user.email) {
+          void dispatchPlatformEmail({
+            user: cred.user,
+            surface: 'website',
+            category: 'login_security',
+            recipientEmail: cred.user.email,
+            bodyText: `A verified Google sign-in to your SWAS TASKS account was recorded at ${new Date().toUTCString()}.`,
+          });
+        }
       }
       return true;
     } catch (err) {
@@ -341,8 +380,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthError(null);
     try {
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
       setEmailAuthUnavailable(false);
+      if (cred.user.emailVerified && cred.user.email) {
+        void dispatchPlatformEmail({
+          user: cred.user,
+          surface: 'website',
+          category: 'login_security',
+          recipientEmail: cred.user.email,
+          bodyText: `A verified sign-in to your SWAS TASKS account was recorded at ${new Date().toUTCString()}.`,
+        });
+      }
       return true;
     } catch (err) {
       const code = (err as { code?: string })?.code;
@@ -402,6 +450,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: 'Your SWAS TASKS account password was updated successfully.',
         linkRoute: 'security',
       });
+      if (firebaseUser.email) {
+        void dispatchPlatformEmail({
+          user: firebaseUser,
+          surface: 'website',
+          category: 'login_security',
+          recipientEmail: firebaseUser.email,
+          subject: '[SWAS TASKS] Security Notice: Password Changed',
+          bodyText:
+            'Your SWAS TASKS account password was updated. If you did not perform this change, contact swastaskorg@gmail.com immediately.',
+        });
+      }
     } catch (err) {
       throw new Error(friendlyAuthError(err, 'email'));
     }
@@ -445,6 +504,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       onboarding.businessName
     );
     clearPendingOnboarding();
+    if (firebaseUser.email) {
+      void dispatchPlatformEmail({
+        user: firebaseUser,
+        surface: 'website',
+        category: onboarding.role === 'client' ? 'client_registration' : 'worker_registration',
+        recipientEmail: firebaseUser.email,
+        bodyText: `Welcome to SWAS TASKS! Your ${onboarding.role} workspace account is ready.`,
+      });
+    }
   }
 
   async function logout(): Promise<void> {
@@ -460,6 +528,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         firebaseUser,
         userPrivate,
         publicProfile,
+        isSuperAdmin,
         profileLoaded,
         needsOnboarding,
         authReady,

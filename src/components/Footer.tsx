@@ -71,12 +71,24 @@ export function Footer({ onNavigate }: FooterProps) {
             <button type="button" onClick={() => onNavigate('contact')} className="hover:text-white transition-colors cursor-pointer">
               Contact Support
             </button>
+            <a
+              href="mailto:swastaskorg@gmail.com"
+              className="text-[13px] text-[#a9bcd3] hover:text-white transition-colors"
+            >
+              swastaskorg@gmail.com
+            </a>
           </div>
         </div>
       </div>
 
-      <div className="max-w-[1160px] mx-auto px-5 py-5 border-t border-white/15 text-[11px] text-[#a9bcd3]">
-        © {year} SWAS TASKS. All marketplace records secured via verified accounts.
+      <div className="max-w-[1160px] mx-auto px-5 py-5 border-t border-white/15 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-[#a9bcd3]">
+        <span>© {year} SWAS TASKS. All marketplace records secured via verified accounts.</span>
+        <span>
+          Official Platform Email:{' '}
+          <a href="mailto:swastaskorg@gmail.com" className="text-white hover:underline">
+            swastaskorg@gmail.com
+          </a>
+        </span>
       </div>
     </footer>
   );

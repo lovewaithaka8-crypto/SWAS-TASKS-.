@@ -13,6 +13,11 @@ import { TaskDetailModal } from './components/TaskDetailModal';
 import { WorkspaceShell } from './components/WorkspaceShell';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import {
+  buildDefaultCentralEmailSettings,
+  subscribeCentralEmailSettings,
+  subscribeEmailLogs,
+} from './lib/emailService';
+import {
   subscribeClientAssignments,
   subscribeClientBids,
   subscribeClientTasks,
@@ -28,12 +33,15 @@ import {
   subscribeWorkerBids,
 } from './lib/marketplaceService';
 import {
+  ADMIN_ONLY_ROUTES,
   ALL_WORKSPACE_ROUTES,
   CLIENT_ONLY_ROUTES,
   WORKER_ONLY_ROUTES,
   type AppNotification,
   type AppRoute,
+  type CentralEmailSettings,
   type Conversation,
+  type EmailDeliveryLog,
   type LedgerTransaction,
   type MarketplaceTask,
   type PublicRoute,
@@ -118,7 +126,11 @@ function EmailVerificationGate({ onSignOut }: { onSignOut: () => void }) {
         </div>
         <h1 className="swas-heading-page">Verify your email to open workspace</h1>
         <p className="swas-body">
-          We sent a verification link to <strong>{firebaseUser?.email}</strong>. Security rules require verified accounts before creating tasks, placing bids, or messaging.
+          We sent a verification link to <strong>{firebaseUser?.email}</strong>. Security rules require verified accounts before creating tasks, placing bids, or messaging. Official platform inquiries:{' '}
+          <a href="mailto:swastaskorg@gmail.com" className="swas-link font-semibold hover:underline">
+            swastaskorg@gmail.com
+          </a>
+          .
         </p>
 
         {notice && (
@@ -285,6 +297,7 @@ function AppRouter() {
   const {
     firebaseUser,
     userPrivate,
+    isSuperAdmin,
     profileLoaded,
     needsOnboarding,
     authReady,
@@ -311,6 +324,10 @@ function AppRouter() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [emailSettings, setEmailSettings] = useState<CentralEmailSettings>(() =>
+    buildDefaultCentralEmailSettings()
+  );
+  const [emailLogs, setEmailLogs] = useState<EmailDeliveryLog[]>([]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -387,6 +404,20 @@ function AppRouter() {
     };
   }, [authReady, firebaseUser?.uid, firebaseUser?.emailVerified, userPrivate?.role]);
 
+  useEffect(() => {
+    if (!authReady || !firebaseUser || !isSuperAdmin) {
+      setEmailSettings(buildDefaultCentralEmailSettings());
+      setEmailLogs([]);
+      return;
+    }
+    const unsubSettings = subscribeCentralEmailSettings(setEmailSettings);
+    const unsubLogs = subscribeEmailLogs(setEmailLogs);
+    return () => {
+      unsubSettings();
+      unsubLogs();
+    };
+  }, [authReady, firebaseUser?.uid, isSuperAdmin]);
+
   // Role & Auth Route Guards
   useEffect(() => {
     if (!authReady) return;
@@ -402,13 +433,15 @@ function AppRouter() {
     }
 
     if (userPrivate && isWorkspaceRoute(route)) {
-      if (userPrivate.role === 'client' && WORKER_ONLY_ROUTES.includes(route)) {
+      if (!isSuperAdmin && ADMIN_ONLY_ROUTES.includes(route)) {
+        navigate('dashboard');
+      } else if (userPrivate.role === 'client' && WORKER_ONLY_ROUTES.includes(route)) {
         navigate('dashboard');
       } else if (userPrivate.role === 'worker' && CLIENT_ONLY_ROUTES.includes(route)) {
         navigate('dashboard');
       }
     }
-  }, [authReady, firebaseUser, userPrivate?.role, route]);
+  }, [authReady, firebaseUser, userPrivate?.role, isSuperAdmin, route]);
 
   const handleOpenChat = (convId: string) => {
     setActiveConversationId(convId);
@@ -485,6 +518,8 @@ function AppRouter() {
           onSelectConversation={setActiveConversationId}
           notifications={notifications}
           supportTickets={supportTickets}
+          emailSettings={emailSettings}
+          emailLogs={emailLogs}
           onNavigate={navigate}
           onSelectTask={setSelectedTask}
           onOpenChat={handleOpenChat}
