@@ -1,0 +1,6 @@
+{
+  "name": "SWAS TASKS",
+  "description": "A two-sided task marketplace connecting clients who need work done with workers ready to deliver.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

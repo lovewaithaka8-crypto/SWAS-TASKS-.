@@ -1,0 +1,671 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'lovewaithaka8@gmail.com'
+      );
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isClient() {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userRole() == 'client';
+    }
+
+    function isWorker() {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userRole() == 'worker';
+    }
+
+    function isBoundedStringList(arr, maxLen) {
+      return arr is list
+        && arr.size() <= maxLen
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 60));
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'role', 'phone', 'photoUrl', 'bio',
+          'skills', 'businessName', 'businessIndustry',
+          'notifyBids', 'notifyMessages', 'notifyPayments', 'publicProfileVisible',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 80
+        && data.role in ['worker', 'client']
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 24))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('skills' in data) || isBoundedStringList(data.skills, 10))
+        && (!('businessName' in data) || (data.businessName is string && data.businessName.size() <= 100))
+        && (!('businessIndustry' in data) || (data.businessIndustry is string && data.businessIndustry.size() <= 80))
+        && (!('notifyBids' in data) || data.notifyBids is bool)
+        && (!('notifyMessages' in data) || data.notifyMessages is bool)
+        && (!('notifyPayments' in data) || data.notifyPayments is bool)
+        && (!('publicProfileVisible' in data) || data.publicProfileVisible is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'uid', 'displayName', 'role', 'bio', 'skills', 'businessName', 'photoUrl',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 80
+        && data.role in ['worker', 'client']
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('skills' in data) || isBoundedStringList(data.skills, 10))
+        && (!('businessName' in data) || (data.businessName is string && data.businessName.size() <= 100))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll([
+          'clientId', 'clientName', 'title', 'description', 'category',
+          'budgetKes', 'deadline', 'visibility', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'clientId', 'clientName', 'title', 'description', 'category', 'skills',
+          'budgetKes', 'deadline', 'attachmentUrl', 'visibility', 'status',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.clientId)
+        && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 80
+        && data.title is string && data.title.size() >= 5 && data.title.size() <= 120
+        && data.description is string && data.description.size() >= 15 && data.description.size() <= 2000
+        && data.category in [
+          'Data & Research',
+          'Content & Copywriting',
+          'Design & Media',
+          'QA & Testing',
+          'Field & Errands',
+          'Web & Technical'
+        ]
+        && (!('skills' in data) || isBoundedStringList(data.skills, 8))
+        && data.budgetKes is number && data.budgetKes >= 50 && data.budgetKes <= 5000000
+        && data.deadline is string && data.deadline.size() >= 4 && data.deadline.size() <= 32
+        && (!('attachmentUrl' in data) || (data.attachmentUrl is string && data.attachmentUrl.size() <= 400))
+        && data.visibility in ['public', 'invite_only']
+        && data.status in ['open', 'paused', 'in_progress', 'completed', 'closed']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBid(data) {
+      return data.keys().hasAll([
+          'taskId', 'taskTitle', 'clientId', 'clientName', 'workerId', 'workerName',
+          'amountKes', 'deliveryDays', 'proposal', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'taskId', 'taskTitle', 'clientId', 'clientName', 'workerId', 'workerName',
+          'amountKes', 'deliveryDays', 'proposal', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.taskId)
+        && isValidId(data.clientId)
+        && isValidId(data.workerId)
+        && data.taskTitle is string && data.taskTitle.size() >= 2 && data.taskTitle.size() <= 120
+        && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 80
+        && data.workerName is string && data.workerName.size() >= 2 && data.workerName.size() <= 80
+        && data.amountKes is number && data.amountKes >= 50 && data.amountKes <= 5000000
+        && data.deliveryDays is int && data.deliveryDays >= 1 && data.deliveryDays <= 365
+        && data.proposal is string && data.proposal.size() >= 10 && data.proposal.size() <= 1500
+        && data.status in ['pending', 'accepted', 'rejected', 'withdrawn']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAssignment(data) {
+      return data.keys().hasAll([
+          'taskId', 'taskTitle', 'bidId', 'clientId', 'clientName', 'workerId',
+          'workerName', 'agreedKes', 'deadline', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'taskId', 'taskTitle', 'bidId', 'clientId', 'clientName', 'workerId',
+          'workerName', 'agreedKes', 'deadline', 'status',
+          'submissionNotes', 'submissionUrl', 'clientFeedback',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.taskId)
+        && isValidId(data.bidId)
+        && isValidId(data.clientId)
+        && isValidId(data.workerId)
+        && data.taskTitle is string && data.taskTitle.size() >= 2 && data.taskTitle.size() <= 120
+        && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 80
+        && data.workerName is string && data.workerName.size() >= 2 && data.workerName.size() <= 80
+        && data.agreedKes is number && data.agreedKes >= 50 && data.agreedKes <= 5000000
+        && data.deadline is string && data.deadline.size() >= 4 && data.deadline.size() <= 32
+        && data.status in ['active', 'submitted', 'revision_requested', 'completed']
+        && (!('submissionNotes' in data) || (data.submissionNotes is string && data.submissionNotes.size() <= 2000))
+        && (!('submissionUrl' in data) || (data.submissionUrl is string && data.submissionUrl.size() <= 400))
+        && (!('clientFeedback' in data) || (data.clientFeedback is string && data.clientFeedback.size() <= 800))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSavedTask(data) {
+      return data.keys().hasAll([
+          'workerId', 'taskId', 'taskTitle', 'category', 'budgetKes', 'deadline', 'clientName', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'workerId', 'taskId', 'taskTitle', 'category', 'budgetKes', 'deadline', 'clientName', 'createdAt'
+        ])
+        && isValidId(data.workerId)
+        && isValidId(data.taskId)
+        && data.taskTitle is string && data.taskTitle.size() >= 2 && data.taskTitle.size() <= 120
+        && data.category is string && data.category.size() >= 2 && data.category.size() <= 60
+        && data.budgetKes is number && data.budgetKes >= 50 && data.budgetKes <= 5000000
+        && data.deadline is string && data.deadline.size() >= 4 && data.deadline.size() <= 32
+        && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 80
+        && data.createdAt is timestamp;
+    }
+
+    function isValidConversation(data) {
+      return data.keys().hasAll([
+          'participants', 'participantNames', 'lastMessage', 'lastSenderId',
+          'unreadBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'participants', 'participantNames', 'taskId', 'taskTitle',
+          'lastMessage', 'lastSenderId', 'unreadBy', 'createdAt', 'updatedAt'
+        ])
+        && data.participants is list
+        && data.participants.size() == 2
+        && data.participants[0] is string && data.participants[1] is string
+        && data.participants[0] != data.participants[1]
+        && data.participantNames is map
+        && (!('taskId' in data) || isValidId(data.taskId))
+        && (!('taskTitle' in data) || (data.taskTitle is string && data.taskTitle.size() <= 120))
+        && data.lastMessage is string && data.lastMessage.size() <= 300
+        && isValidId(data.lastSenderId)
+        && isBoundedStringList(data.unreadBy, 2)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll([
+          'conversationId', 'participants', 'senderId', 'senderName', 'text', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'conversationId', 'participants', 'senderId', 'senderName', 'text', 'attachmentUrl', 'createdAt'
+        ])
+        && isValidId(data.conversationId)
+        && data.participants is list && data.participants.size() == 2
+        && data.participants[0] is string && data.participants[1] is string
+        && isValidId(data.senderId)
+        && data.senderName is string && data.senderName.size() >= 2 && data.senderName.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 1500
+        && (!('attachmentUrl' in data) || (data.attachmentUrl is string && data.attachmentUrl.size() <= 400))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['userId', 'actorId', 'type', 'title', 'body', 'read', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'actorId', 'type', 'title', 'body', 'linkRoute', 'read', 'createdAt'])
+        && isValidId(data.userId)
+        && isValidId(data.actorId)
+        && data.type in [
+          'bid_received', 'bid_accepted', 'bid_rejected',
+          'assignment_submitted', 'revision_requested', 'work_approved',
+          'payment_update', 'security_alert'
+        ]
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
+        && data.body is string && data.body.size() >= 2 && data.body.size() <= 400
+        && (!('linkRoute' in data) || (data.linkRoute is string && data.linkRoute.size() <= 64))
+        && data.read is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWallet(data) {
+      return data.keys().hasAll(['userId', 'currency', 'availableKes', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'currency', 'availableKes', 'updatedAt'])
+        && isValidId(data.userId)
+        && data.currency == 'KES'
+        && data.availableKes is number && data.availableKes >= 0
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll([
+          'userId', 'counterpartyId', 'assignmentId', 'taskTitle',
+          'kind', 'amountKes', 'status', 'reference', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'counterpartyId', 'assignmentId', 'taskTitle',
+          'kind', 'amountKes', 'status', 'reference', 'createdAt'
+        ])
+        && isValidId(data.userId)
+        && isValidId(data.counterpartyId)
+        && isValidId(data.assignmentId)
+        && data.taskTitle is string && data.taskTitle.size() >= 2 && data.taskTitle.size() <= 120
+        && data.kind in ['earning', 'payment']
+        && data.amountKes is number && data.amountKes >= 50 && data.amountKes <= 5000000
+        && data.status in ['pending_confirmation', 'verified_settled']
+        && data.reference is string && data.reference.size() >= 2 && data.reference.size() <= 120
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWithdrawal(data) {
+      return data.keys().hasAll(['userId', 'amountKes', 'method', 'destination', 'status', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'amountKes', 'method', 'destination', 'status', 'createdAt'])
+        && isValidId(data.userId)
+        && data.amountKes is number && data.amountKes >= 50 && data.amountKes <= 5000000
+        && data.method in ['M-Pesa', 'Bank Transfer']
+        && data.destination is string && data.destination.size() >= 4 && data.destination.size() <= 120
+        && data.status == 'requested'
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSupportTicket(data) {
+      return data.keys().hasAll(['userId', 'senderName', 'category', 'subject', 'message', 'status', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'senderName', 'category', 'subject', 'message', 'status', 'createdAt'])
+        && isValidId(data.userId)
+        && data.senderName is string && data.senderName.size() >= 2 && data.senderName.size() <= 80
+        && data.category in ['Tasks & Bids', 'Payments & Wallet', 'Account & Security', 'General']
+        && data.subject is string && data.subject.size() >= 3 && data.subject.size() <= 120
+        && data.message is string && data.message.size() >= 10 && data.message.size() <= 1500
+        && data.status == 'open'
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list, create, update, delete: if false;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserPrivate(incoming())
+        && isOwner(userId)
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserPrivate(incoming())
+        && (isOwner(userId) || isAdmin())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().role == existing().role
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'phone', 'photoUrl', 'bio', 'skills',
+          'businessName', 'businessIndustry',
+          'notifyBids', 'notifyMessages', 'notifyPayments', 'publicProfileVisible',
+          'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    match /publicProfiles/{userId} {
+      allow get: if isValidId(userId) && existing().uid is string;
+      allow list: if existing().uid is string;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidPublicProfile(incoming())
+        && isOwner(userId)
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidPublicProfile(incoming())
+        && (isOwner(userId) || isAdmin())
+        && incoming().uid == existing().uid
+        && incoming().role == existing().role
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'bio', 'skills', 'businessName', 'photoUrl', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    match /tasks/{taskId} {
+      allow get: if isValidId(taskId) && (
+        existing().visibility == 'public'
+        || (isSignedIn() && existing().clientId == request.auth.uid)
+        || isAdmin()
+      );
+      allow list: if existing().visibility == 'public'
+        || (isSignedIn() && existing().clientId == request.auth.uid)
+        || isAdmin();
+
+      allow create: if isClient()
+        && isValidId(taskId)
+        && isValidTask(incoming())
+        && incoming().clientId == request.auth.uid
+        && incoming().status in ['open', 'paused']
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(taskId)
+        && isValidTask(incoming())
+        && (isAdmin() || (isClient() && existing().clientId == request.auth.uid))
+        && incoming().clientId == existing().clientId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'category', 'skills', 'budgetKes',
+            'deadline', 'attachmentUrl', 'visibility', 'status', 'updatedAt'
+          ])
+        );
+
+      allow delete: if false;
+    }
+
+    match /bids/{bidId} {
+      allow get: if isValidId(bidId) && isSignedIn() && (
+        existing().workerId == request.auth.uid
+        || existing().clientId == request.auth.uid
+        || isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        existing().workerId == request.auth.uid
+        || existing().clientId == request.auth.uid
+        || isAdmin()
+      );
+
+      allow create: if isWorker()
+        && isValidId(bidId)
+        && isValidBid(incoming())
+        && incoming().workerId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/tasks/$(incoming().taskId))
+        && get(/databases/$(database)/documents/tasks/$(incoming().taskId)).data.status == 'open'
+        && get(/databases/$(database)/documents/tasks/$(incoming().taskId)).data.clientId == incoming().clientId
+        && get(/databases/$(database)/documents/tasks/$(incoming().taskId)).data.clientId != request.auth.uid;
+
+      allow update: if isVerifiedUser()
+        && isValidId(bidId)
+        && isValidBid(incoming())
+        && incoming().taskId == existing().taskId
+        && incoming().clientId == existing().clientId
+        && incoming().workerId == existing().workerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && existing().status == 'pending'
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && (
+          isAdmin()
+          || (existing().workerId == request.auth.uid && incoming().status == 'withdrawn')
+          || (isClient() && existing().clientId == request.auth.uid && incoming().status in ['accepted', 'rejected'])
+        );
+
+      allow delete: if false;
+    }
+
+    match /assignments/{assignmentId} {
+      allow get: if isValidId(assignmentId) && isSignedIn() && (
+        existing().workerId == request.auth.uid
+        || existing().clientId == request.auth.uid
+        || isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        existing().workerId == request.auth.uid
+        || existing().clientId == request.auth.uid
+        || isAdmin()
+      );
+
+      allow create: if isClient()
+        && isValidId(assignmentId)
+        && isValidAssignment(incoming())
+        && incoming().clientId == request.auth.uid
+        && incoming().status == 'active'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/bids/$(incoming().bidId))
+        && getAfter(/databases/$(database)/documents/bids/$(incoming().bidId)).data.status == 'accepted'
+        && getAfter(/databases/$(database)/documents/bids/$(incoming().bidId)).data.clientId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/bids/$(incoming().bidId)).data.workerId == incoming().workerId
+        && getAfter(/databases/$(database)/documents/bids/$(incoming().bidId)).data.amountKes == incoming().agreedKes;
+
+      allow update: if isVerifiedUser()
+        && isValidId(assignmentId)
+        && isValidAssignment(incoming())
+        && incoming().taskId == existing().taskId
+        && incoming().bidId == existing().bidId
+        && incoming().clientId == existing().clientId
+        && incoming().workerId == existing().workerId
+        && incoming().agreedKes == existing().agreedKes
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().workerId == request.auth.uid
+            && existing().status in ['active', 'revision_requested']
+            && incoming().status == 'submitted'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'submissionNotes', 'submissionUrl', 'updatedAt'
+            ])
+          )
+          || (
+            isClient()
+            && existing().clientId == request.auth.uid
+            && existing().status == 'submitted'
+            && incoming().status in ['revision_requested', 'completed']
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'clientFeedback', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    match /savedTasks/{savedId} {
+      allow get: if isValidId(savedId) && isSignedIn() && (existing().workerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().workerId == request.auth.uid || isAdmin());
+
+      allow create: if isWorker()
+        && isValidId(savedId)
+        && isValidSavedTask(incoming())
+        && incoming().workerId == request.auth.uid
+        && incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidId(savedId) && (existing().workerId == request.auth.uid || isAdmin());
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if isValidId(conversationId) && isSignedIn() && (request.auth.uid in existing().participants || isAdmin());
+      allow list: if isSignedIn() && (request.auth.uid in existing().participants || isAdmin());
+
+      allow create: if isVerifiedUser()
+        && isValidId(conversationId)
+        && isValidConversation(incoming())
+        && request.auth.uid in incoming().participants
+        && incoming().lastSenderId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(conversationId)
+        && isValidConversation(incoming())
+        && request.auth.uid in existing().participants
+        && incoming().participants == existing().participants
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'lastMessage', 'lastSenderId', 'unreadBy', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow get: if isValidId(messageId) && isSignedIn() && (
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+          || isAdmin()
+        );
+        allow list: if isSignedIn() && (request.auth.uid in existing().participants || isAdmin());
+
+        allow create: if isVerifiedUser()
+          && isValidId(messageId)
+          && isValidMessage(incoming())
+          && incoming().conversationId == conversationId
+          && incoming().senderId == request.auth.uid
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/conversations/$(conversationId))
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+          && incoming().participants == get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+
+        allow update, delete: if false;
+      }
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+
+      allow create: if isVerifiedUser()
+        && isValidId(notificationId)
+        && isValidNotification(incoming())
+        && incoming().actorId == request.auth.uid
+        && incoming().read == false
+        && incoming().createdAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(notificationId)
+        && isValidNotification(incoming())
+        && (existing().userId == request.auth.uid || isAdmin())
+        && incoming().userId == existing().userId
+        && incoming().actorId == existing().actorId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+
+      allow delete: if false;
+    }
+
+    match /wallets/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidWallet(incoming())
+        && isOwner(userId)
+        && incoming().userId == request.auth.uid
+        && incoming().availableKes == 0
+        && incoming().updatedAt == request.time;
+
+      allow update, delete: if false;
+    }
+
+    match /transactions/{txId} {
+      allow get: if isValidId(txId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+
+      allow create: if isClient()
+        && isValidId(txId)
+        && isValidTransaction(incoming())
+        && incoming().status == 'pending_confirmation'
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId))
+        && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.status == 'completed'
+        && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.clientId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.agreedKes == incoming().amountKes
+        && (
+          (incoming().kind == 'payment' && incoming().userId == request.auth.uid)
+          || (
+            incoming().kind == 'earning'
+            && incoming().userId == getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.workerId
+          )
+        );
+
+      allow update, delete: if false;
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow get: if isValidId(withdrawalId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+
+      allow create: if isWorker()
+        && isValidId(withdrawalId)
+        && isValidWithdrawal(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'requested'
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/wallets/$(request.auth.uid))
+        && incoming().amountKes <= get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.availableKes;
+
+      allow update, delete: if false;
+    }
+
+    match /supportTickets/{ticketId} {
+      allow get: if isValidId(ticketId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+
+      allow create: if isVerifiedUser()
+        && isValidId(ticketId)
+        && isValidSupportTicket(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'open'
+        && incoming().createdAt == request.time;
+
+      allow update, delete: if false;
+    }
+  }
+}

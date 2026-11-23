@@ -1,0 +1,783 @@
+{
+  "entities": {
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Private user account, role, preferences, and contact details isolated to the owner.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Authentication UID."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Verified account email."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Full name or display name."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["worker", "client"],
+          "description": "Immutable account role assigned at registration."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 24,
+          "description": "Private phone or M-Pesa number."
+        },
+        "photoUrl": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional avatar URL."
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Short worker or client bio."
+        },
+        "skills": {
+          "type": "array",
+          "description": "Worker skills list (bounded to max 10 items)."
+        },
+        "businessName": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Optional client business name."
+        },
+        "businessIndustry": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Optional client business industry."
+        },
+        "notifyBids": {
+          "type": "boolean",
+          "description": "Preference for bid notifications."
+        },
+        "notifyMessages": {
+          "type": "boolean",
+          "description": "Preference for message notifications."
+        },
+        "notifyPayments": {
+          "type": "boolean",
+          "description": "Preference for payment notifications."
+        },
+        "publicProfileVisible": {
+          "type": "boolean",
+          "description": "Privacy toggle for public profile visibility."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Non-PII public profile visible to marketplace participants.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "role": {
+          "type": "string",
+          "enum": ["worker", "client"]
+        },
+        "bio": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "skills": {
+          "type": "array"
+        },
+        "businessName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "photoUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Task posted by a client with KES budget, skills, deadline, and visibility.",
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "title": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "minLength": 15,
+          "maxLength": 2000
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Data & Research",
+            "Content & Copywriting",
+            "Design & Media",
+            "QA & Testing",
+            "Field & Errands",
+            "Web & Technical"
+          ]
+        },
+        "skills": {
+          "type": "array"
+        },
+        "budgetKes": {
+          "type": "number"
+        },
+        "deadline": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32
+        },
+        "attachmentUrl": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "invite_only"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "paused", "in_progress", "completed", "closed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "clientId",
+        "clientName",
+        "title",
+        "description",
+        "category",
+        "budgetKes",
+        "deadline",
+        "visibility",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Bid": {
+      "title": "Bid",
+      "description": "Worker bid proposal against an open task.",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "workerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workerName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "amountKes": {
+          "type": "number"
+        },
+        "deliveryDays": {
+          "type": "number"
+        },
+        "proposal": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1500
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "rejected", "withdrawn"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "taskId",
+        "taskTitle",
+        "clientId",
+        "clientName",
+        "workerId",
+        "workerName",
+        "amountKes",
+        "deliveryDays",
+        "proposal",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Accepted task assignment tracked from execution through revision and client approval.",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "bidId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "workerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workerName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "agreedKes": {
+          "type": "number"
+        },
+        "deadline": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "submitted", "revision_requested", "completed"]
+        },
+        "submissionNotes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "submissionUrl": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "clientFeedback": {
+          "type": "string",
+          "maxLength": 800
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "taskId",
+        "taskTitle",
+        "bidId",
+        "clientId",
+        "clientName",
+        "workerId",
+        "workerName",
+        "agreedKes",
+        "deadline",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SavedTask": {
+      "title": "SavedTask",
+      "description": "Bookmarked task saved by a worker.",
+      "type": "object",
+      "properties": {
+        "workerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "budgetKes": {
+          "type": "number"
+        },
+        "deadline": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "clientName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["workerId", "taskId", "taskTitle", "category", "budgetKes", "deadline", "clientName", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Two-party conversation thread between client and worker.",
+      "type": "object",
+      "properties": {
+        "participants": {
+          "type": "array"
+        },
+        "participantNames": {
+          "type": "object"
+        },
+        "taskId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "taskTitle": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "lastMessage": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "lastSenderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "unreadBy": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["participants", "participantNames", "lastMessage", "lastSenderId", "unreadBy", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Individual chat message within a conversation.",
+      "type": "object",
+      "properties": {
+        "conversationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "participants": {
+          "type": "array"
+        },
+        "senderId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "attachmentUrl": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["conversationId", "participants", "senderId", "senderName", "text", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Real-time activity notification for a user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "bid_received",
+            "bid_accepted",
+            "bid_rejected",
+            "assignment_submitted",
+            "revision_requested",
+            "work_approved",
+            "payment_update",
+            "security_alert"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "body": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 400
+        },
+        "linkRoute": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "read": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "actorId", "type", "title", "body", "read", "createdAt"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "User wallet state initialized to zero KES.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["KES"]
+        },
+        "availableKes": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "currency", "availableKes", "updatedAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Ledger transaction created upon verified assignment approval; provider settlement pending until backend confirmation.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "counterpartyId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "assignmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "taskTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["earning", "payment"]
+        },
+        "amountKes": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending_confirmation", "verified_settled"]
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "counterpartyId",
+        "assignmentId",
+        "taskTitle",
+        "kind",
+        "amountKes",
+        "status",
+        "reference",
+        "createdAt"
+      ]
+    },
+    "Withdrawal": {
+      "title": "Withdrawal",
+      "description": "Worker withdrawal request linked to verified available funds.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "amountKes": {
+          "type": "number"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["M-Pesa", "Bank Transfer"]
+        },
+        "destination": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["requested"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "amountKes", "method", "destination", "status", "createdAt"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Authenticated user help & support ticket.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Tasks & Bids", "Payments & Wallet", "Account & Security", "General"]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1500
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "senderName", "category", "subject", "message", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Private user account and role configuration."
+    },
+    "/publicProfiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Public non-PII profiles."
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Marketplace tasks created by clients."
+    },
+    "/bids/{bidId}": {
+      "schema": { "$ref": "#/entities/Bid" },
+      "description": "Worker bids submitted for open tasks."
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/Assignment" },
+      "description": "Accepted task assignments."
+    },
+    "/savedTasks/{savedId}": {
+      "schema": { "$ref": "#/entities/SavedTask" },
+      "description": "Worker bookmarked tasks."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Client-worker conversation metadata."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages inside a conversation."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Real-time user notifications."
+    },
+    "/wallets/{userId}": {
+      "schema": { "$ref": "#/entities/Wallet" },
+      "description": "User wallet state in KES."
+    },
+    "/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Financial transaction records."
+    },
+    "/withdrawals/{withdrawalId}": {
+      "schema": { "$ref": "#/entities/Withdrawal" },
+      "description": "Worker withdrawal requests."
+    },
+    "/supportTickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicket" },
+      "description": "Authenticated user support tickets."
+    }
+  }
+}
