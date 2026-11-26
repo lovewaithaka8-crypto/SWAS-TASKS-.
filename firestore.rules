@@ -38,47 +38,86 @@ service cloud.firestore {
       );
     }
 
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function userRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return userData().role;
+    }
+
+    function isAccountActive() {
+      return isAdmin() || (
+        userDocExists() && (
+          !('accountStatus' in userData()) ||
+          userData().accountStatus == 'ACTIVE'
+        )
+      );
     }
 
     function isClient() {
       return isVerifiedUser()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && userRole() == 'client';
+        && userDocExists()
+        && userRole() == 'client'
+        && isAccountActive();
     }
 
     function isWorker() {
       return isVerifiedUser()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && userRole() == 'worker';
+        && userDocExists()
+        && userRole() == 'worker'
+        && isAccountActive();
     }
 
     function isBoundedStringList(arr, maxLen) {
       return arr is list
         && arr.size() <= maxLen
-        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 60));
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 80));
     }
 
     // --- Validation Blueprints ---
     function isValidUserPrivate(data) {
       return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
-          'uid', 'email', 'displayName', 'role', 'phone', 'photoUrl', 'bio',
-          'skills', 'businessName', 'businessIndustry',
+          'uid', 'email', 'displayName', 'username', 'role',
+          'accountStatus', 'statusReason', 'approvedAt', 'approvedBy',
+          'rejectedAt', 'rejectedBy', 'suspendedAt', 'suspendedBy', 'suspendedReason',
+          'emailVerified', 'phone', 'phoneVerified', 'photoUrl', 'bio',
+          'skills', 'businessName', 'businessIndustry', 'country', 'preferredCurrency',
+          'referralCode', 'referredBy',
           'notifyBids', 'notifyMessages', 'notifyPayments', 'publicProfileVisible',
-          'createdAt', 'updatedAt'
+          'lastLoginAt', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.uid)
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
         && data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 80
+        && (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 30 && data.username.matches('^[a-z0-9_]+$')))
         && data.role in ['worker', 'client']
+        && (!('accountStatus' in data) || data.accountStatus in [
+          'REGISTERED', 'EMAIL_VERIFICATION_PENDING', 'PENDING_ADMIN_APPROVAL',
+          'ACTIVE', 'RESTRICTED', 'SUSPENDED', 'REJECTED', 'CLOSED'
+        ])
+        && (!('statusReason' in data) || (data.statusReason is string && data.statusReason.size() <= 400))
+        && (!('approvedBy' in data) || isValidId(data.approvedBy))
+        && (!('rejectedBy' in data) || isValidId(data.rejectedBy))
+        && (!('suspendedBy' in data) || isValidId(data.suspendedBy))
+        && (!('suspendedReason' in data) || (data.suspendedReason is string && data.suspendedReason.size() <= 400))
+        && (!('emailVerified' in data) || data.emailVerified is bool)
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 24))
+        && (!('phoneVerified' in data) || data.phoneVerified is bool)
         && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500))
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
         && (!('skills' in data) || isBoundedStringList(data.skills, 10))
         && (!('businessName' in data) || (data.businessName is string && data.businessName.size() <= 100))
         && (!('businessIndustry' in data) || (data.businessIndustry is string && data.businessIndustry.size() <= 80))
+        && (!('country' in data) || (data.country is string && data.country.size() >= 2 && data.country.size() <= 12))
+        && (!('preferredCurrency' in data) || (data.preferredCurrency is string && data.preferredCurrency.size() >= 3 && data.preferredCurrency.size() <= 8))
+        && (!('referralCode' in data) || (data.referralCode is string && data.referralCode.size() <= 32))
+        && (!('referredBy' in data) || (data.referredBy is string && data.referredBy.size() <= 128))
         && (!('notifyBids' in data) || data.notifyBids is bool)
         && (!('notifyMessages' in data) || data.notifyMessages is bool)
         && (!('notifyPayments' in data) || data.notifyPayments is bool)
@@ -90,11 +129,12 @@ service cloud.firestore {
     function isValidPublicProfile(data) {
       return data.keys().hasAll(['uid', 'displayName', 'role', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
-          'uid', 'displayName', 'role', 'bio', 'skills', 'businessName', 'photoUrl',
+          'uid', 'displayName', 'username', 'role', 'bio', 'skills', 'businessName', 'photoUrl',
           'createdAt', 'updatedAt'
         ])
         && isValidId(data.uid)
         && data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 80
+        && (!('username' in data) || (data.username is string && data.username.size() >= 3 && data.username.size() <= 30))
         && data.role in ['worker', 'client']
         && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
         && (!('skills' in data) || isBoundedStringList(data.skills, 10))
@@ -110,28 +150,34 @@ service cloud.firestore {
           'budgetKes', 'deadline', 'visibility', 'status', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'clientId', 'clientName', 'title', 'description', 'category', 'skills',
+          'clientId', 'clientName', 'title', 'description', 'category', 'categoryId', 'skills',
           'budgetKes', 'deadline', 'attachmentUrl', 'visibility', 'status',
+          'executionMode', 'sourceType', 'sourceName', 'sourceWebsite', 'sourceTaskId',
+          'importMethod', 'sourceAttribution', 'sourceRewardOriginal', 'sourceCurrency',
+          'permissionConfirmed', 'redistributionRightsConfirmed', 'lifecycleStatus',
+          'maxSlots', 'claimedCount', 'availableSlots', 'perUserLimit',
+          'instructions', 'requiredDeliverables', 'completionDeclarationRequired',
+          'autoApprovalEligible', 'manualReviewOnly', 'reviewWindowMinutes',
+          'scheduledPublishAt', 'expiresAt', 'version', 'recurringSchedule',
           'createdAt', 'updatedAt'
         ])
         && isValidId(data.clientId)
         && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 80
         && data.title is string && data.title.size() >= 5 && data.title.size() <= 120
-        && data.description is string && data.description.size() >= 15 && data.description.size() <= 2000
-        && data.category in [
-          'Data & Research',
-          'Content & Copywriting',
-          'Design & Media',
-          'QA & Testing',
-          'Field & Errands',
-          'Web & Technical'
-        ]
+        && data.description is string && data.description.size() >= 15 && data.description.size() <= 4000
+        && data.category is string && data.category.size() >= 2 && data.category.size() <= 80
+        && (!('categoryId' in data) || isValidId(data.categoryId))
         && (!('skills' in data) || isBoundedStringList(data.skills, 8))
         && data.budgetKes is number && data.budgetKes >= 50 && data.budgetKes <= 5000000
         && data.deadline is string && data.deadline.size() >= 4 && data.deadline.size() <= 32
         && (!('attachmentUrl' in data) || (data.attachmentUrl is string && data.attachmentUrl.size() <= 400))
         && data.visibility in ['public', 'invite_only']
         && data.status in ['open', 'paused', 'in_progress', 'completed', 'closed']
+        && (!('executionMode' in data) || data.executionMode in ['bid_marketplace', 'direct_claim'])
+        && (!('sourceType' in data) || data.sourceType in ['SWAS_ORIGINAL', 'GWENO_HUB', 'AUTHORIZED_PARTNER'])
+        && (!('lifecycleStatus' in data) || data.lifecycleStatus in [
+          'DRAFT', 'SCHEDULED', 'PUBLISHED', 'PAUSED', 'FULL', 'EXPIRED', 'CANCELLED', 'ARCHIVED'
+        ])
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -197,7 +243,7 @@ service cloud.firestore {
         && isValidId(data.workerId)
         && isValidId(data.taskId)
         && data.taskTitle is string && data.taskTitle.size() >= 2 && data.taskTitle.size() <= 120
-        && data.category is string && data.category.size() >= 2 && data.category.size() <= 60
+        && data.category is string && data.category.size() >= 2 && data.category.size() <= 80
         && data.budgetKes is number && data.budgetKes >= 50 && data.budgetKes <= 5000000
         && data.deadline is string && data.deadline.size() >= 4 && data.deadline.size() <= 32
         && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 80
@@ -252,7 +298,8 @@ service cloud.firestore {
         && data.type in [
           'bid_received', 'bid_accepted', 'bid_rejected',
           'assignment_submitted', 'revision_requested', 'work_approved',
-          'payment_update', 'security_alert'
+          'payment_update', 'security_alert', 'policy_update',
+          'account_status', 'auto_approval', 'withdrawal_update', 'announcement'
         ]
         && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
         && data.body is string && data.body.size() >= 2 && data.body.size() <= 400
@@ -263,10 +310,20 @@ service cloud.firestore {
 
     function isValidWallet(data) {
       return data.keys().hasAll(['userId', 'currency', 'availableKes', 'updatedAt'])
-        && data.keys().hasOnly(['userId', 'currency', 'availableKes', 'updatedAt'])
+        && data.keys().hasOnly([
+          'userId', 'currency', 'availableKes', 'availableBalance',
+          'pendingEarnings', 'totalEarned', 'totalWithdrawn', 'reservedWithdrawalFunds',
+          'balancesByCurrency', 'updatedAt'
+        ])
         && isValidId(data.userId)
-        && data.currency == 'KES'
+        && data.currency is string && data.currency.size() >= 3 && data.currency.size() <= 8
         && data.availableKes is number && data.availableKes >= 0
+        && (!('availableBalance' in data) || (data.availableBalance is number && data.availableBalance >= 0))
+        && (!('pendingEarnings' in data) || (data.pendingEarnings is number && data.pendingEarnings >= 0))
+        && (!('totalEarned' in data) || (data.totalEarned is number && data.totalEarned >= 0))
+        && (!('totalWithdrawn' in data) || (data.totalWithdrawn is number && data.totalWithdrawn >= 0))
+        && (!('reservedWithdrawalFunds' in data) || (data.reservedWithdrawalFunds is number && data.reservedWithdrawalFunds >= 0))
+        && (!('balancesByCurrency' in data) || (data.balancesByCurrency is map && data.balancesByCurrency.size() <= 15))
         && data.updatedAt is timestamp;
     }
 
@@ -277,27 +334,141 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId', 'counterpartyId', 'assignmentId', 'taskTitle',
-          'kind', 'amountKes', 'status', 'reference', 'createdAt'
+          'kind', 'amountKes', 'currency', 'status', 'reference',
+          'provider', 'providerReference', 'withdrawalId', 'auditNote', 'createdAt'
         ])
         && isValidId(data.userId)
         && isValidId(data.counterpartyId)
         && isValidId(data.assignmentId)
         && data.taskTitle is string && data.taskTitle.size() >= 2 && data.taskTitle.size() <= 120
-        && data.kind in ['earning', 'payment']
-        && data.amountKes is number && data.amountKes >= 50 && data.amountKes <= 5000000
+        && data.kind in [
+          'earning', 'payment', 'withdrawal_request', 'withdrawal_fee',
+          'payment_confirmation', 'refund', 'reversal', 'adjustment', 'currency_conversion'
+        ]
+        && data.amountKes is number && data.amountKes >= 0 && data.amountKes <= 50000000
+        && (!('currency' in data) || (data.currency is string && data.currency.size() >= 3 && data.currency.size() <= 8))
         && data.status in ['pending_confirmation', 'verified_settled']
         && data.reference is string && data.reference.size() >= 2 && data.reference.size() <= 120
+        && (!('provider' in data) || (data.provider is string && data.provider.size() <= 64))
+        && (!('providerReference' in data) || (data.providerReference is string && data.providerReference.size() <= 128))
+        && (!('withdrawalId' in data) || isValidId(data.withdrawalId))
+        && (!('auditNote' in data) || (data.auditNote is string && data.auditNote.size() <= 300))
         && data.createdAt is timestamp;
     }
 
     function isValidWithdrawal(data) {
       return data.keys().hasAll(['userId', 'amountKes', 'method', 'destination', 'status', 'createdAt'])
-        && data.keys().hasOnly(['userId', 'amountKes', 'method', 'destination', 'status', 'createdAt'])
+        && data.keys().hasOnly([
+          'userId', 'amountKes', 'currency', 'feeAmount', 'netAmount',
+          'method', 'destination', 'country', 'institutionId', 'institutionName',
+          'category', 'payoutAccountId', 'maskedDestination', 'reference',
+          'providerStatus', 'providerReference', 'txHash', 'idempotencyKey',
+          'reviewNotes', 'rejectionReason', 'approvedBy', 'paidBy',
+          'cryptoAsset', 'cryptoNetwork', 'status', 'createdAt', 'updatedAt'
+        ])
         && isValidId(data.userId)
-        && data.amountKes is number && data.amountKes >= 50 && data.amountKes <= 5000000
-        && data.method in ['M-Pesa', 'Bank Transfer']
-        && data.destination is string && data.destination.size() >= 4 && data.destination.size() <= 120
-        && data.status == 'requested'
+        && data.amountKes is number && data.amountKes >= 1 && data.amountKes <= 50000000
+        && (!('currency' in data) || (data.currency is string && data.currency.size() >= 3 && data.currency.size() <= 8))
+        && (!('feeAmount' in data) || (data.feeAmount is number && data.feeAmount >= 0))
+        && (!('netAmount' in data) || (data.netAmount is number && data.netAmount >= 0))
+        && data.method is string && data.method.size() >= 2 && data.method.size() <= 80
+        && data.destination is string && data.destination.size() >= 4 && data.destination.size() <= 160
+        && (!('country' in data) || (data.country is string && data.country.size() >= 2 && data.country.size() <= 12))
+        && (!('institutionId' in data) || (data.institutionId is string && data.institutionId.size() <= 64))
+        && (!('institutionName' in data) || (data.institutionName is string && data.institutionName.size() <= 100))
+        && (!('category' in data) || data.category in [
+          'mobile_money', 'banks', 'digital_wallets', 'payment_gateways', 'cryptocurrency', 'international_transfers'
+        ])
+        && (!('payoutAccountId' in data) || isValidId(data.payoutAccountId))
+        && (!('maskedDestination' in data) || (data.maskedDestination is string && data.maskedDestination.size() <= 120))
+        && (!('reference' in data) || (data.reference is string && data.reference.size() <= 64))
+        && (!('providerStatus' in data) || (data.providerStatus is string && data.providerStatus.size() <= 64))
+        && (!('providerReference' in data) || (data.providerReference is string && data.providerReference.size() <= 128))
+        && (!('txHash' in data) || (data.txHash is string && data.txHash.size() <= 160))
+        && (!('idempotencyKey' in data) || (data.idempotencyKey is string && data.idempotencyKey.size() <= 128))
+        && (!('reviewNotes' in data) || (data.reviewNotes is string && data.reviewNotes.size() <= 400))
+        && (!('rejectionReason' in data) || (data.rejectionReason is string && data.rejectionReason.size() <= 400))
+        && (!('approvedBy' in data) || isValidId(data.approvedBy))
+        && (!('paidBy' in data) || isValidId(data.paidBy))
+        && (!('cryptoAsset' in data) || (data.cryptoAsset is string && data.cryptoAsset.size() <= 24))
+        && (!('cryptoNetwork' in data) || (data.cryptoNetwork is string && data.cryptoNetwork.size() <= 32))
+        && data.status in [
+          'requested', 'pending_verification', 'approved', 'processing',
+          'paid', 'failed', 'rejected', 'cancelled',
+          'PENDING_ADMIN_APPROVAL', 'APPROVED_FOR_PAYMENT', 'PROCESSING',
+          'PAID', 'REJECTED', 'ON_HOLD', 'CANCELLED'
+        ]
+        && data.createdAt is timestamp
+        && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidPayoutAccount(data) {
+      return data.keys().hasAll([
+          'userId', 'institutionId', 'institutionName', 'category', 'country',
+          'currency', 'accountHolderName', 'maskedAccount', 'accountLast4',
+          'accountReference', 'verificationStatus', 'isDefault', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'institutionId', 'institutionName', 'category', 'country',
+          'currency', 'accountHolderName', 'maskedAccount', 'accountLast4',
+          'accountReference', 'bankBranchOrCode', 'cryptoAsset', 'cryptoNetwork',
+          'verificationStatus', 'isDefault', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && data.institutionId is string && data.institutionId.size() >= 2 && data.institutionId.size() <= 64
+        && data.institutionName is string && data.institutionName.size() >= 2 && data.institutionName.size() <= 100
+        && data.category in [
+          'mobile_money', 'banks', 'digital_wallets', 'payment_gateways', 'cryptocurrency', 'international_transfers'
+        ]
+        && data.country is string && data.country.size() >= 2 && data.country.size() <= 12
+        && data.currency is string && data.currency.size() >= 3 && data.currency.size() <= 8
+        && data.accountHolderName is string && data.accountHolderName.size() >= 2 && data.accountHolderName.size() <= 100
+        && data.maskedAccount is string && data.maskedAccount.size() >= 4 && data.maskedAccount.size() <= 64
+        && data.accountLast4 is string && data.accountLast4.size() >= 2 && data.accountLast4.size() <= 16
+        && data.accountReference is string && data.accountReference.size() >= 4 && data.accountReference.size() <= 160
+        && (!('bankBranchOrCode' in data) || (data.bankBranchOrCode is string && data.bankBranchOrCode.size() <= 64))
+        && (!('cryptoAsset' in data) || (data.cryptoAsset is string && data.cryptoAsset.size() <= 24))
+        && (!('cryptoNetwork' in data) || (data.cryptoNetwork is string && data.cryptoNetwork.size() <= 32))
+        && data.verificationStatus in ['pending', 'verified', 'requires_review']
+        && data.isDefault is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFinancialConfig(data) {
+      return data.keys().hasAll([
+          'countries', 'currencies', 'institutions',
+          'cryptoPayoutsEnabled', 'requireReauthForPayoutAccountChanges',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'countries', 'currencies', 'institutions',
+          'cryptoPayoutsEnabled', 'requireReauthForPayoutAccountChanges',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.countries is list && data.countries.size() >= 1 && data.countries.size() <= 40
+        && data.currencies is list && data.currencies.size() >= 1 && data.currencies.size() <= 30
+        && data.institutions is list && data.institutions.size() >= 1 && data.institutions.size() <= 120
+        && data.cryptoPayoutsEnabled is bool
+        && data.requireReauthForPayoutAccountChanges is bool
+        && isValidId(data.updatedBy)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFinancialAuditLog(data) {
+      return data.keys().hasAll(['actorId', 'action', 'targetType', 'targetId', 'details', 'createdAt'])
+        && data.keys().hasOnly([
+          'actorId', 'actorEmail', 'action', 'targetType', 'targetId',
+          'currency', 'amount', 'details', 'createdAt'
+        ])
+        && isValidId(data.actorId)
+        && (!('actorEmail' in data) || (data.actorEmail is string && data.actorEmail.size() <= 254))
+        && data.action is string && data.action.size() >= 2 && data.action.size() <= 80
+        && data.targetType in ['withdrawal', 'payout_account', 'financial_config', 'wallet', 'provider']
+        && isValidId(data.targetId)
+        && (!('currency' in data) || (data.currency is string && data.currency.size() >= 3 && data.currency.size() <= 8))
+        && (!('amount' in data) || data.amount is number)
+        && data.details is string && data.details.size() >= 2 && data.details.size() <= 500
         && data.createdAt is timestamp;
     }
 
@@ -362,11 +533,143 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidPolicyCategory(data) {
+      return data.keys().hasAll([
+          'code', 'slug', 'title', 'description', 'order', 'enabled', 'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'code', 'slug', 'title', 'description', 'order', 'enabled', 'updatedBy', 'updatedAt'
+        ])
+        && data.code is string && data.code.size() >= 1 && data.code.size() <= 8
+        && isValidId(data.slug)
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
+        && data.description is string && data.description.size() >= 2 && data.description.size() <= 400
+        && data.order is number && data.order >= 0 && data.order <= 500
+        && data.enabled is bool
+        && isValidId(data.updatedBy)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPolicyDocument(data) {
+      return data.keys().hasAll([
+          'slug', 'title', 'categoryId', 'categoryTitle', 'summary', 'status',
+          'version', 'effectiveDate', 'lastUpdatedDate', 'requiresAcceptance',
+          'sections', 'updatedBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'slug', 'title', 'categoryId', 'categoryTitle', 'summary', 'status',
+          'version', 'effectiveDate', 'lastUpdatedDate', 'requiresAcceptance',
+          'acceptanceContexts', 'changeSummary', 'sections', 'relatedPolicySlugs',
+          'pendingAdminReviewItems', 'updatedBy', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.slug)
+        && data.title is string && data.title.size() >= 3 && data.title.size() <= 140
+        && isValidId(data.categoryId)
+        && data.categoryTitle is string && data.categoryTitle.size() >= 2 && data.categoryTitle.size() <= 120
+        && data.summary is string && data.summary.size() >= 10 && data.summary.size() <= 600
+        && data.status in ['published', 'updated', 'draft', 'archived']
+        && data.version is string && data.version.size() >= 1 && data.version.size() <= 24
+        && data.effectiveDate is string && data.effectiveDate.size() >= 4 && data.effectiveDate.size() <= 24
+        && data.lastUpdatedDate is string && data.lastUpdatedDate.size() >= 4 && data.lastUpdatedDate.size() <= 24
+        && data.requiresAcceptance is bool
+        && (!('acceptanceContexts' in data) || isBoundedStringList(data.acceptanceContexts, 10))
+        && (!('changeSummary' in data) || (data.changeSummary is string && data.changeSummary.size() <= 500))
+        && data.sections is list && data.sections.size() >= 1 && data.sections.size() <= 25
+        && data.sections[0] is map
+        && (!('relatedPolicySlugs' in data) || isBoundedStringList(data.relatedPolicySlugs, 12))
+        && (!('pendingAdminReviewItems' in data) || (
+          data.pendingAdminReviewItems is list
+          && data.pendingAdminReviewItems.size() <= 15
+          && (data.pendingAdminReviewItems.size() == 0 || (data.pendingAdminReviewItems[0] is string && data.pendingAdminReviewItems[0].size() <= 300))
+        ))
+        && isValidId(data.updatedBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPolicyRevision(data) {
+      return data.keys().hasAll([
+          'policyId', 'policyTitle', 'categoryTitle', 'version', 'status',
+          'effectiveDate', 'changeReason', 'materialChange', 'requiresReacceptance',
+          'summarySnapshot', 'sectionsSnapshot', 'editorId', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'policyId', 'policyTitle', 'categoryTitle', 'version', 'previousVersion',
+          'status', 'effectiveDate', 'changeReason', 'materialChange',
+          'requiresReacceptance', 'summarySnapshot', 'sectionsSnapshot',
+          'editorId', 'editorEmail', 'createdAt'
+        ])
+        && isValidId(data.policyId)
+        && data.policyTitle is string && data.policyTitle.size() >= 3 && data.policyTitle.size() <= 140
+        && data.categoryTitle is string && data.categoryTitle.size() >= 2 && data.categoryTitle.size() <= 120
+        && data.version is string && data.version.size() >= 1 && data.version.size() <= 24
+        && (!('previousVersion' in data) || (data.previousVersion is string && data.previousVersion.size() <= 24))
+        && data.status in ['published', 'updated', 'draft', 'archived']
+        && data.effectiveDate is string && data.effectiveDate.size() >= 4 && data.effectiveDate.size() <= 24
+        && data.changeReason is string && data.changeReason.size() >= 3 && data.changeReason.size() <= 500
+        && data.materialChange is bool
+        && data.requiresReacceptance is bool
+        && data.summarySnapshot is string && data.summarySnapshot.size() >= 10 && data.summarySnapshot.size() <= 600
+        && data.sectionsSnapshot is list && data.sectionsSnapshot.size() >= 1 && data.sectionsSnapshot.size() <= 25
+        && data.sectionsSnapshot[0] is map
+        && isValidId(data.editorId)
+        && (!('editorEmail' in data) || (data.editorEmail is string && data.editorEmail.size() <= 254))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPolicyAcceptance(data) {
+      return data.keys().hasAll([
+          'userId', 'policyId', 'policySlug', 'policyTitle', 'policyVersion',
+          'presentedEffectiveDate', 'acceptanceContext', 'consentStatement', 'acceptedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'policyId', 'policySlug', 'policyTitle', 'policyVersion',
+          'presentedEffectiveDate', 'acceptanceContext', 'consentStatement', 'acceptedAt'
+        ])
+        && isValidId(data.userId)
+        && isValidId(data.policyId)
+        && isValidId(data.policySlug)
+        && data.policyTitle is string && data.policyTitle.size() >= 3 && data.policyTitle.size() <= 140
+        && data.policyVersion is string && data.policyVersion.size() >= 1 && data.policyVersion.size() <= 24
+        && data.presentedEffectiveDate is string && data.presentedEffectiveDate.size() >= 4 && data.presentedEffectiveDate.size() <= 24
+        && data.acceptanceContext is string && data.acceptanceContext.size() >= 2 && data.acceptanceContext.size() <= 64
+        && data.consentStatement is string && data.consentStatement.size() >= 10 && data.consentStatement.size() <= 300
+        && data.acceptedAt is timestamp;
+    }
+
+    function isValidPolicyRegistry(data) {
+      return data.keys().hasAll([
+          'public', 'draftPolicyIds', 'archivedPolicyIds', 'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'public', 'draftPolicyIds', 'archivedPolicyIds', 'updatedBy', 'updatedAt'
+        ])
+        && data.public == true
+        && isBoundedStringList(data.draftPolicyIds, 500)
+        && isBoundedStringList(data.archivedPolicyIds, 500)
+        && isValidId(data.updatedBy)
+        && data.updatedAt is timestamp;
+    }
+
     // --- Collection Rules ---
 
     match /admins/{adminId} {
       allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
       allow list, create, update, delete: if false;
+    }
+
+    // Non-PII username reservation lookup
+    match /usernames/{username} {
+      allow get: if isValidId(username);
+      allow list: if false;
+      allow create: if isSignedIn()
+        && isValidId(username)
+        && incoming().keys().hasAll(['uid', 'username', 'createdAt'])
+        && incoming().keys().hasOnly(['uid', 'username', 'createdAt'])
+        && incoming().uid == request.auth.uid
+        && incoming().username == username
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
     }
 
     match /users/{userId} {
@@ -378,24 +681,30 @@ service cloud.firestore {
         && isValidUserPrivate(incoming())
         && isOwner(userId)
         && incoming().uid == request.auth.uid
+        && (!('accountStatus' in incoming()) || incoming().accountStatus in ['EMAIL_VERIFICATION_PENDING', 'PENDING_ADMIN_APPROVAL'])
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
 
       allow update: if isVerifiedUser()
         && isValidId(userId)
         && isValidUserPrivate(incoming())
-        && (isOwner(userId) || isAdmin())
-        && incoming().uid == existing().uid
-        && incoming().email == existing().email
-        && incoming().role == existing().role
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly([
-          'displayName', 'phone', 'photoUrl', 'bio', 'skills',
-          'businessName', 'businessIndustry',
-          'notifyBids', 'notifyMessages', 'notifyPayments', 'publicProfileVisible',
-          'updatedAt'
-        ]);
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().uid == existing().uid
+            && incoming().email == existing().email
+            && incoming().role == existing().role
+            && incoming().createdAt == existing().createdAt
+            && incoming().updatedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'phone', 'photoUrl', 'bio', 'skills',
+              'businessName', 'businessIndustry', 'country', 'preferredCurrency',
+              'notifyBids', 'notifyMessages', 'notifyPayments', 'publicProfileVisible',
+              'updatedAt'
+            ])
+          )
+        );
 
       allow delete: if false;
     }
@@ -427,6 +736,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /accountApplications/{applicationId} {
+      allow get: if isValidId(applicationId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
     match /tasks/{taskId} {
       allow get: if isValidId(taskId) && (
         existing().visibility == 'public'
@@ -437,13 +752,19 @@ service cloud.firestore {
         || (isSignedIn() && existing().clientId == request.auth.uid)
         || isAdmin();
 
-      allow create: if isClient()
-        && isValidId(taskId)
+      allow create: if isValidId(taskId)
         && isValidTask(incoming())
-        && incoming().clientId == request.auth.uid
-        && incoming().status in ['open', 'paused']
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isClient()
+            && incoming().clientId == request.auth.uid
+            && incoming().status in ['open', 'paused']
+            && (!('sourceType' in incoming()) || incoming().sourceType == 'SWAS_ORIGINAL')
+          )
+        );
 
       allow update: if isVerifiedUser()
         && isValidId(taskId)
@@ -461,6 +782,61 @@ service cloud.firestore {
         );
 
       allow delete: if false;
+    }
+
+    match /taskCategories/{categoryId} {
+      allow get: if isValidId(categoryId) && (existing().enabled == true || isAdmin());
+      allow list: if existing().enabled == true || isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /taskSources/{sourceId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /taskSourceImports/{importId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /taskVersions/{versionId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /taskReservations/{reservationId} {
+      allow get: if isValidId(reservationId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /taskSubmissions/{submissionId} {
+      allow get: if isValidId(submissionId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /submissionAttachments/{attachmentId} {
+      allow get: if isValidId(attachmentId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /taskReviews/{reviewId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /taskCorrections/{correctionId} {
+      allow get: if isValidId(correctionId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /taskApprovalTimers/{timerId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /bids/{bidId} {
@@ -544,7 +920,8 @@ service cloud.firestore {
         && (
           isAdmin()
           || (
-            existing().workerId == request.auth.uid
+            isAccountActive()
+            && existing().workerId == request.auth.uid
             && existing().status in ['active', 'revision_requested']
             && incoming().status == 'submitted'
             && incoming().diff(existing()).affectedKeys().hasOnly([
@@ -633,6 +1010,7 @@ service cloud.firestore {
         && isValidId(notificationId)
         && isValidNotification(incoming())
         && incoming().actorId == request.auth.uid
+        && (incoming().type != 'policy_update' || isAdmin())
         && incoming().read == false
         && incoming().createdAt == request.time;
 
@@ -658,49 +1036,197 @@ service cloud.firestore {
         && isOwner(userId)
         && incoming().userId == request.auth.uid
         && incoming().availableKes == 0
+        && (!('availableBalance' in incoming()) || incoming().availableBalance == 0)
+        && (!('pendingEarnings' in incoming()) || incoming().pendingEarnings == 0)
+        && (!('totalEarned' in incoming()) || incoming().totalEarned == 0)
+        && (!('totalWithdrawn' in incoming()) || incoming().totalWithdrawn == 0)
+        && (!('reservedWithdrawalFunds' in incoming()) || incoming().reservedWithdrawalFunds == 0)
+        && (!('balancesByCurrency' in incoming()) || incoming().balancesByCurrency.size() == 0)
         && incoming().updatedAt == request.time;
 
-      allow update, delete: if false;
+      allow update: if isAdmin()
+        && isValidId(userId)
+        && isValidWallet(incoming())
+        && incoming().userId == existing().userId
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    match /walletLedger/{entryId} {
+      allow get: if isValidId(entryId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /earnings/{earningId} {
+      allow get: if isValidId(earningId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
     }
 
     match /transactions/{txId} {
       allow get: if isValidId(txId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
 
-      allow create: if isClient()
-        && isValidId(txId)
+      allow create: if isValidId(txId)
         && isValidTransaction(incoming())
-        && incoming().status == 'pending_confirmation'
         && incoming().createdAt == request.time
-        && existsAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId))
-        && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.status == 'completed'
-        && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.clientId == request.auth.uid
-        && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.agreedKes == incoming().amountKes
         && (
-          (incoming().kind == 'payment' && incoming().userId == request.auth.uid)
-          || (
-            incoming().kind == 'earning'
-            && incoming().userId == getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.workerId
+          (
+            isClient()
+            && incoming().status == 'pending_confirmation'
+            && existsAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId))
+            && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.status == 'completed'
+            && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.clientId == request.auth.uid
+            && getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.agreedKes == incoming().amountKes
+            && (
+              (incoming().kind == 'payment' && incoming().userId == request.auth.uid)
+              || (
+                incoming().kind == 'earning'
+                && incoming().userId == getAfter(/databases/$(database)/documents/assignments/$(incoming().assignmentId)).data.workerId
+              )
+            )
           )
+          || isAdmin()
         );
 
-      allow update, delete: if false;
+      allow update: if isAdmin()
+        && isValidId(txId)
+        && isValidTransaction(incoming())
+        && incoming().userId == existing().userId
+        && incoming().counterpartyId == existing().counterpartyId
+        && incoming().assignmentId == existing().assignmentId
+        && incoming().kind == existing().kind
+        && incoming().amountKes == existing().amountKes
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'provider', 'providerReference', 'auditNote'
+        ]);
+
+      allow delete: if false;
     }
 
     match /withdrawals/{withdrawalId} {
       allow get: if isValidId(withdrawalId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
 
-      allow create: if isWorker()
+      // Withdrawals are created & balance-reserved atomically by the backend API (/api/withdrawals/request)
+      // or by Admin tooling; clients cannot bypass balance reservation directly.
+      allow create: if isAdmin()
         && isValidId(withdrawalId)
         && isValidWithdrawal(incoming())
+        && incoming().createdAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(withdrawalId)
+        && isValidWithdrawal(incoming())
+        && incoming().userId == existing().userId
+        && incoming().amountKes == existing().amountKes
+        && incoming().method == existing().method
+        && incoming().destination == existing().destination
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && isAdmin()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'providerStatus', 'providerReference', 'txHash',
+          'reviewNotes', 'rejectionReason', 'approvedBy', 'paidBy', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+
+    match /payoutAccounts/{accountId} {
+      allow get, list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+
+      allow create: if isVerifiedUser()
+        && isValidId(accountId)
+        && isValidPayoutAccount(incoming())
         && incoming().userId == request.auth.uid
-        && incoming().status == 'requested'
+        && incoming().verificationStatus in ['pending', 'requires_review']
         && incoming().createdAt == request.time
-        && exists(/databases/$(database)/documents/wallets/$(request.auth.uid))
-        && incoming().amountKes <= get(/databases/$(database)/documents/wallets/$(request.auth.uid)).data.availableKes;
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(accountId)
+        && isValidPayoutAccount(incoming())
+        && (existing().userId == request.auth.uid || isAdmin())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            incoming().verificationStatus in ['pending', 'requires_review']
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'institutionId', 'institutionName', 'category', 'country', 'currency',
+              'accountHolderName', 'maskedAccount', 'accountLast4', 'accountReference',
+              'bankBranchOrCode', 'cryptoAsset', 'cryptoNetwork',
+              'verificationStatus', 'isDefault', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(accountId)
+        && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    match /financialConfig/{configId} {
+      allow get, list: if isSignedIn();
+
+      allow create, update: if isAdmin()
+        && isValidId(configId)
+        && isValidFinancialConfig(incoming())
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    match /financialAuditLogs/{logId} {
+      allow get, list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidFinancialAuditLog(incoming())
+        && incoming().actorId == request.auth.uid
+        && incoming().createdAt == request.time;
 
       allow update, delete: if false;
+    }
+
+    match /adminSettings/{settingId} {
+      allow get: if isValidId(settingId) && (isAdmin() || (isSignedIn() && settingId == 'autoApproval'));
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId) && isSignedIn() && (existing().published == true || isAdmin());
+      allow list: if isSignedIn() && (existing().published == true || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /referrals/{referralId} {
+      allow get: if isValidId(referralId) && isSignedIn() && (
+        existing().referrerUid == request.auth.uid || existing().referredUid == request.auth.uid || isAdmin()
+      );
+      allow list: if isSignedIn() && (
+        existing().referrerUid == request.auth.uid || existing().referredUid == request.auth.uid || isAdmin()
+      );
+      allow create, update, delete: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /securityEvents/{eventId} {
+      allow get: if isValidId(eventId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /supportTickets/{ticketId} {
@@ -739,6 +1265,79 @@ service cloud.firestore {
         && incoming().createdAt == request.time;
 
       allow update, delete: if false;
+    }
+
+    match /policyCategories/{categoryId} {
+      allow get: if isValidId(categoryId) && (existing().enabled == true || isAdmin());
+      allow list: if existing().enabled == true || isAdmin();
+
+      allow create, update: if isAdmin()
+        && isValidId(categoryId)
+        && isValidPolicyCategory(incoming())
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    match /policies/{policyId} {
+      allow get: if isValidId(policyId) && (existing().status in ['published', 'updated'] || isAdmin());
+      allow list: if existing().status in ['published', 'updated'] || isAdmin();
+
+      allow create: if isAdmin()
+        && isValidId(policyId)
+        && isValidPolicyDocument(incoming())
+        && incoming().updatedBy == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(policyId)
+        && isValidPolicyDocument(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+
+    match /policyRevisions/{revisionId} {
+      allow get: if isValidId(revisionId) && (existing().status in ['published', 'updated'] || isAdmin());
+      allow list: if existing().status in ['published', 'updated'] || isAdmin();
+
+      allow create: if isAdmin()
+        && isValidId(revisionId)
+        && isValidPolicyRevision(incoming())
+        && incoming().editorId == request.auth.uid
+        && incoming().createdAt == request.time;
+
+      allow update, delete: if false;
+    }
+
+    match /policyAcceptances/{acceptanceId} {
+      allow get: if isValidId(acceptanceId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn()
+        && isValidId(acceptanceId)
+        && isValidPolicyAcceptance(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().acceptedAt == request.time;
+
+      allow update, delete: if false;
+    }
+
+    match /policyRegistry/{registryId} {
+      allow get: if isValidId(registryId) && (existing().public == true || isAdmin());
+      allow list: if existing().public == true || isAdmin();
+
+      allow create, update: if isAdmin()
+        && isValidId(registryId)
+        && isValidPolicyRegistry(incoming())
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
     }
   }
 }

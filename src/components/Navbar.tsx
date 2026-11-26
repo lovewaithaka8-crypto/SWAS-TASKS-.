@@ -13,6 +13,7 @@ const NAV_ITEMS: { route: PublicRoute; label: string }[] = [
   { route: 'about', label: 'About Us' },
   { route: 'how', label: 'How It Works' },
   { route: 'tasks', label: 'Browse Tasks' },
+  { route: 'policies', label: 'Policies' },
   { route: 'contact', label: 'Contact' },
 ];
 

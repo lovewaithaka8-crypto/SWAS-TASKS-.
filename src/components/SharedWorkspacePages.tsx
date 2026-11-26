@@ -10,7 +10,6 @@ import {
   Send,
   ShieldCheck,
   UserCircle,
-  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { OFFICIAL_EMAIL_IDENTITY } from '../lib/emailConfig';
@@ -21,28 +20,37 @@ import {
   markConversationRead,
   markNotificationRead,
   sendChatMessage,
-  submitWithdrawalRequest,
   subscribeMessages,
   updateUserAccountSettings,
 } from '../lib/marketplaceService';
-import { formatKes, parseSkillsInput, SCHEMA_LIMITS } from '../lib/validation';
+import { parseSkillsInput, SCHEMA_LIMITS } from '../lib/validation';
 import type {
   AppNotification,
   ChatMessage,
   Conversation,
+  FinancialPlatformConfig,
   LedgerTransaction,
+  PayoutAccount,
+  PolicyAcceptanceRecord,
+  PolicyDocument,
   SupportCategory,
   SupportTicket,
   WalletAccount,
   WithdrawalRequest,
   WorkspaceRoute,
 } from '../types/marketplace';
+import { FinancialCentrePages } from './FinancialCentrePages';
 
 interface SharedWorkspacePagesProps {
   route: WorkspaceRoute;
   wallet: WalletAccount | null;
   transactions: LedgerTransaction[];
   withdrawals: WithdrawalRequest[];
+  payoutAccounts: PayoutAccount[];
+  financialConfig: FinancialPlatformConfig;
+  policies: PolicyDocument[];
+  userAcceptances: PolicyAcceptanceRecord[];
+  onOpenPublicPolicy: (slug?: string | null) => void;
   conversations: Conversation[];
   activeConversationId: string | null;
   onSelectConversation: (id: string | null) => void;
@@ -57,6 +65,11 @@ export function SharedWorkspacePages({
   wallet,
   transactions,
   withdrawals,
+  payoutAccounts,
+  financialConfig,
+  policies,
+  userAcceptances,
+  onOpenPublicPolicy,
   conversations,
   activeConversationId,
   onSelectConversation,
@@ -67,16 +80,22 @@ export function SharedWorkspacePages({
 }: SharedWorkspacePagesProps) {
   if (
     route === 'wallet' ||
+    route === 'payout-accounts' ||
     route === 'transactions' ||
     route === 'withdrawals' ||
     route === 'payment-history'
   ) {
     return (
-      <FinancePages
+      <FinancialCentrePages
         route={route}
         wallet={wallet}
         transactions={transactions}
         withdrawals={withdrawals}
+        payoutAccounts={payoutAccounts}
+        financialConfig={financialConfig}
+        policies={policies}
+        userAcceptances={userAcceptances}
+        onOpenPublicPolicy={onOpenPublicPolicy}
         onNavigate={onNavigate}
       />
     );
@@ -94,395 +113,19 @@ export function SharedWorkspacePages({
     return <NotificationsView notifications={notifications} onNavigate={onNavigate} />;
   }
   if (route === 'support') {
-    return <SupportView supportTickets={supportTickets} />;
+    return <SupportView supportTickets={supportTickets} onOpenPublicPolicy={onOpenPublicPolicy} />;
   }
   if (route === 'profile' || route === 'settings' || route === 'security') {
     return (
       <AccountPages
         route={route}
         onNavigate={onNavigate}
+        onOpenPublicPolicy={onOpenPublicPolicy}
         onSignOut={onSignOut}
       />
     );
   }
   return null;
-}
-
-function FinancePages({
-  route,
-  wallet,
-  transactions,
-  withdrawals,
-  onNavigate,
-}: {
-  route: 'wallet' | 'transactions' | 'withdrawals' | 'payment-history';
-  wallet: WalletAccount | null;
-  transactions: LedgerTransaction[];
-  withdrawals: WithdrawalRequest[];
-  onNavigate: (route: WorkspaceRoute) => void;
-}) {
-  const { firebaseUser, userPrivate } = useAuth();
-  const isWorker = userPrivate?.role === 'worker';
-  const availableKes = wallet?.availableKes ?? 0;
-
-  const pendingKes = useMemo(
-    () =>
-      transactions
-        .filter((t) => t.status === 'pending_confirmation')
-        .reduce((sum, t) => sum + t.amountKes, 0),
-    [transactions]
-  );
-
-  const settledKes = useMemo(
-    () =>
-      transactions
-        .filter((t) => t.status === 'verified_settled')
-        .reduce((sum, t) => sum + t.amountKes, 0),
-    [transactions]
-  );
-
-  const [txFilter, setTxFilter] = useState<'all' | 'pending_confirmation' | 'verified_settled'>('all');
-  const [wdAmount, setWdAmount] = useState('');
-  const [wdMethod, setWdMethod] = useState<'M-Pesa' | 'Bank Transfer'>('M-Pesa');
-  const [wdDest, setWdDest] = useState('');
-  const [wdBusy, setWdBusy] = useState(false);
-  const [wdError, setWdError] = useState<string | null>(null);
-  const [wdSuccess, setWdSuccess] = useState<string | null>(null);
-
-  const filteredTx = useMemo(() => {
-    if (txFilter === 'all') return transactions;
-    return transactions.filter((t) => t.status === txFilter);
-  }, [transactions, txFilter]);
-
-  const handleWithdrawalSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!firebaseUser) return;
-    setWdBusy(true);
-    setWdError(null);
-    setWdSuccess(null);
-    try {
-      await submitWithdrawalRequest({
-        userId: firebaseUser.uid,
-        availableKes,
-        amountKes: Number(wdAmount),
-        method: wdMethod,
-        destination: wdDest,
-      });
-      let emailNote = '';
-      if (firebaseUser.email) {
-        const emailRes = await dispatchPlatformEmail({
-          user: firebaseUser,
-          surface: 'website',
-          category: 'withdrawal_notification',
-          recipientEmail: firebaseUser.email,
-          bodyText: `Your withdrawal request of KES ${Number(wdAmount).toLocaleString('en-KE')} via ${wdMethod} (${wdDest}) has been logged on SWAS TASKS.`,
-        });
-        emailNote = emailRes.sent
-          ? ` Confirmation sent from ${OFFICIAL_EMAIL_IDENTITY.officialEmail}.`
-          : ' (Email confirmation skipped: EMAIL SERVICE NOT CONFIGURED)';
-      }
-      setWdSuccess(`Withdrawal request logged for backend settlement processing.${emailNote}`);
-      setWdAmount('');
-      setWdDest('');
-    } catch (err) {
-      setWdError(err instanceof Error ? err.message : 'Unable to submit withdrawal request.');
-    } finally {
-      setWdBusy(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="swas-card rounded-[13px] p-5">
-          <div className="flex items-center justify-between">
-            <span className="swas-heading-card">Verified Available Balance</span>
-            <Wallet className="w-[18px] h-[18px] text-[#15966b]" />
-          </div>
-          <div className="mt-2 swas-stat text-[#15966b]">{formatKes(availableKes)}</div>
-          <p className="mt-1 swas-desc">Confirmed settled funds in KES</p>
-        </div>
-
-        <div className="swas-card rounded-[13px] p-5">
-          <span className="swas-heading-card">Pending Settlement</span>
-          <div className="mt-2 swas-stat text-[#d99527]">{formatKes(pendingKes)}</div>
-          <p className="mt-1 swas-desc">
-            Approved assignments awaiting backend provider confirmation
-          </p>
-        </div>
-
-        <div className="swas-card rounded-[13px] p-5">
-          <span className="swas-heading-card">
-            {isWorker ? 'Total Settled Earnings' : 'Total Settled Payments'}
-          </span>
-          <div className="mt-2 swas-stat text-[#172b46]">{formatKes(settledKes)}</div>
-          <p className="mt-1 swas-desc">Confirmed ledger total</p>
-        </div>
-      </div>
-
-      <div className="p-4 rounded-[11px] bg-[#e9f2ff] border border-[#b7cff0] text-[13px] text-[#172b46] leading-relaxed">
-        <strong>Settlement Verification Notice:</strong> Client assignment approvals log verifiable{' '}
-        <span className="font-medium text-[#2877d5]">pending_confirmation</span> entries. No balance or payment is marked{' '}
-        <span className="font-medium text-[#15966b]">verified_settled</span> until confirmed by the backend payment provider.
-      </div>
-
-      {route === 'wallet' && (
-        <div className="swas-card rounded-[13px] p-6 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="swas-heading-section">Wallet Quick Actions</h3>
-              <p className="swas-desc mt-0.5">
-                Inspect itemized ledger transactions, settlement references, and payout requests.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => onNavigate('transactions')}
-                className="px-3.5 py-2 swas-btn-text bg-[#f3f6fa] text-[#172b46] rounded-[8px] hover:bg-[#e9f2ff] cursor-pointer"
-              >
-                Transactions ({transactions.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigate('withdrawals')}
-                className="px-3.5 py-2 swas-btn-text swas-btn-primary rounded-[8px] cursor-pointer"
-              >
-                Withdrawal Requests
-              </button>
-            </div>
-          </div>
-
-          {transactions.length === 0 ? (
-            <p className="swas-body">
-              No wallet ledger entries yet. Approved assignments automatically create KES ledger records here.
-            </p>
-          ) : (
-            <div className="space-y-2.5">
-              {transactions.slice(0, 5).map((tx) => (
-                <div
-                  key={tx.id}
-                  className="p-3.5 rounded-[10px] bg-[#f9fbfe] border border-[#e1e8f2] flex items-center justify-between gap-3"
-                >
-                  <div>
-                    <p className="text-[14px] font-semibold text-[#172b46]">{tx.taskTitle}</p>
-                    <p className="swas-meta">
-                      {tx.reference} · {tx.kind}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-[14px] font-bold text-[#172b46] tabular-nums">
-                      {formatKes(tx.amountKes)}
-                    </span>
-                    <span
-                      className={`text-[11px] font-medium ${
-                        tx.status === 'verified_settled' ? 'text-[#15966b]' : 'text-[#d99527]'
-                      }`}
-                    >
-                      {tx.status === 'verified_settled' ? 'Verified Settled' : 'Pending Confirmation'}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {(route === 'transactions' || route === 'payment-history') && (
-        <div className="swas-card rounded-[13px] p-6 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="swas-heading-section">
-              {route === 'payment-history' ? 'Assignment Payment History' : 'Ledger Transactions'}
-            </h3>
-            <div className="flex gap-1.5">
-              {(['all', 'pending_confirmation', 'verified_settled'] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setTxFilter(f)}
-                  className={`px-3 py-1.5 swas-btn-text rounded-[8px] cursor-pointer ${
-                    txFilter === f
-                      ? 'bg-[#1265c8] text-white'
-                      : 'bg-[#f3f6fa] text-[#42556f] hover:bg-[#e9f2ff]'
-                  }`}
-                >
-                  {f === 'all' ? 'All' : f === 'pending_confirmation' ? 'Pending' : 'Settled'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {filteredTx.length === 0 ? (
-            <p className="swas-body text-center py-6 text-[#75869d]">
-              No ledger entries match this filter yet.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse swas-table">
-                <thead>
-                  <tr className="border-b border-[#e1e8f2] text-[#75869d]">
-                    <th className="py-2.5 pr-4 font-semibold">Reference</th>
-                    <th className="py-2.5 pr-4 font-semibold">Task</th>
-                    <th className="py-2.5 pr-4 font-semibold">Type</th>
-                    <th className="py-2.5 pr-4 font-semibold">Amount</th>
-                    <th className="py-2.5 pr-4 font-semibold">Status</th>
-                    <th className="py-2.5 font-semibold">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#e1e8f2]">
-                  {filteredTx.map((tx) => (
-                    <tr key={tx.id}>
-                      <td className="py-3 pr-4 font-medium text-[#172b46]">{tx.reference}</td>
-                      <td className="py-3 pr-4 font-medium text-[#42556f]">{tx.taskTitle}</td>
-                      <td className="py-3 pr-4 capitalize text-[#42556f]">{tx.kind}</td>
-                      <td className="py-3 pr-4 font-semibold text-[#172b46] tabular-nums">
-                        {formatKes(tx.amountKes)}
-                      </td>
-                      <td className="py-3 pr-4 font-semibold">
-                        <span
-                          className={
-                            tx.status === 'verified_settled' ? 'text-[#15966b]' : 'text-[#d99527]'
-                          }
-                        >
-                          {tx.status === 'verified_settled' ? 'Verified Settled' : 'Pending Confirmation'}
-                        </span>
-                      </td>
-                      <td className="py-3 text-[#75869d] tabular-nums">
-                        {tx.createdAt?.toDate ? tx.createdAt.toDate().toLocaleDateString('en-KE') : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {route === 'withdrawals' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-5 swas-card rounded-[13px] p-6 space-y-4">
-            <h3 className="swas-heading-section">Request Payout</h3>
-            {!isWorker ? (
-              <p className="swas-body text-[#75869d]">
-                Withdrawal requests apply to Worker earnings accounts. Client payment settlements are tracked under Payment History.
-              </p>
-            ) : (
-              <>
-                <p className="swas-desc">
-                  Withdraw verified available KES balance (minimum KES 50) to M-Pesa or Bank Transfer.
-                </p>
-
-                {availableKes < 50 && (
-                  <div className="p-3.5 rounded-[9px] bg-[#fff8ec] border border-[#f5dca8] text-[12px] text-[#9b6611]">
-                    Verified available balance is currently <strong>{formatKes(availableKes)}</strong>. Minimum KES 50 in confirmed settled earnings is required before submitting a withdrawal request.
-                  </div>
-                )}
-
-                {wdSuccess && (
-                  <div className="p-3.5 rounded-[9px] bg-[#eaf8f2] border border-[#bce8d4] text-[13px] text-[#15966b]">
-                    {wdSuccess}
-                  </div>
-                )}
-                {wdError && (
-                  <div className="p-3.5 rounded-[9px] bg-[#fff0f0] border border-[#f1c7c7] text-[13px] text-[#d34552]">
-                    {wdError}
-                  </div>
-                )}
-
-                <form onSubmit={handleWithdrawalSubmit} className="space-y-3">
-                  <div>
-                    <label className="block swas-label mb-1">Amount (KES)</label>
-                    <input
-                      type="number"
-                      required
-                      min={50}
-                      max={Math.max(50, availableKes)}
-                      disabled={availableKes < 50}
-                      value={wdAmount}
-                      onChange={(e) => setWdAmount(e.target.value)}
-                      placeholder="500"
-                      className="w-full px-3 py-2 swas-input tabular-nums bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] disabled:opacity-50"
-                    />
-                  </div>
-                  <div>
-                    <label className="block swas-label mb-1">Payout Method</label>
-                    <select
-                      disabled={availableKes < 50}
-                      value={wdMethod}
-                      onChange={(e) => setWdMethod(e.target.value as 'M-Pesa' | 'Bank Transfer')}
-                      className="w-full px-3 py-2 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] disabled:opacity-50"
-                    >
-                      <option value="M-Pesa">M-Pesa</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block swas-label mb-1">
-                      {wdMethod === 'M-Pesa' ? 'M-Pesa Phone Number' : 'Bank & Account Number'}
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      minLength={4}
-                      maxLength={120}
-                      disabled={availableKes < 50}
-                      value={wdDest}
-                      onChange={(e) => setWdDest(e.target.value)}
-                      placeholder={wdMethod === 'M-Pesa' ? '+254 7XX XXX XXX' : 'Bank Name · Account'}
-                      className="w-full px-3 py-2 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] disabled:opacity-50"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={wdBusy || availableKes < 50}
-                    className="w-full py-2.5 swas-btn-text swas-btn-primary rounded-[9px] disabled:opacity-50 cursor-pointer"
-                  >
-                    {wdBusy ? 'Submitting...' : 'Submit Withdrawal Request'}
-                  </button>
-                </form>
-              </>
-            )}
-          </div>
-
-          <div className="lg:col-span-7 swas-card rounded-[13px] p-6 space-y-4">
-            <h3 className="swas-heading-section">Withdrawal History</h3>
-            {withdrawals.length === 0 ? (
-              <p className="swas-body text-[#75869d]">No withdrawal requests submitted yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {withdrawals.map((w) => (
-                  <div
-                    key={w.id}
-                    className="p-3.5 rounded-[10px] bg-[#f9fbfe] border border-[#e1e8f2] flex items-center justify-between gap-3"
-                  >
-                    <div>
-                      <p className="text-[14px] font-semibold text-[#172b46]">
-                        {w.method} · {w.destination}
-                      </p>
-                      <p className="swas-meta">
-                        Requested{' '}
-                        {w.createdAt?.toDate ? w.createdAt.toDate().toLocaleDateString('en-KE') : 'Recently'}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <span className="block text-[14px] font-bold text-[#172b46] tabular-nums">
-                        {formatKes(w.amountKes)}
-                      </span>
-                      <span className="text-[11px] font-semibold capitalize text-[#d99527]">
-                        {w.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 function MessagesView({
@@ -788,7 +431,13 @@ function NotificationsView({
   );
 }
 
-function SupportView({ supportTickets }: { supportTickets: SupportTicket[] }) {
+function SupportView({
+  supportTickets,
+  onOpenPublicPolicy,
+}: {
+  supportTickets: SupportTicket[];
+  onOpenPublicPolicy: (slug?: string | null) => void;
+}) {
   const { firebaseUser, userPrivate } = useAuth();
   const [category, setCategory] = useState<SupportCategory>('Tasks & Bids');
   const [subject, setSubject] = useState('');
@@ -911,6 +560,33 @@ function SupportView({ supportTickets }: { supportTickets: SupportTicket[] }) {
             {busy ? 'Sending...' : 'Submit Ticket'}
           </button>
         </form>
+
+        <div className="pt-3 border-t border-[#e1e8f2] text-[12px] text-[#5b6d85] space-x-2">
+          <span>Helpful guides:</span>
+          <button
+            type="button"
+            onClick={() => onOpenPublicPolicy('appeals')}
+            className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+          >
+            Appeals Policy
+          </button>
+          <span>·</span>
+          <button
+            type="button"
+            onClick={() => onOpenPublicPolicy('complaint-resolution')}
+            className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+          >
+            Complaint Resolution
+          </button>
+          <span>·</span>
+          <button
+            type="button"
+            onClick={() => onOpenPublicPolicy('support-helpdesk')}
+            className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+          >
+            Helpdesk Rules
+          </button>
+        </div>
       </div>
 
       <div className="lg:col-span-6 swas-card rounded-[13px] p-6 space-y-4">
@@ -941,10 +617,12 @@ function SupportView({ supportTickets }: { supportTickets: SupportTicket[] }) {
 function AccountPages({
   route,
   onNavigate,
+  onOpenPublicPolicy,
   onSignOut,
 }: {
   route: 'profile' | 'settings' | 'security';
   onNavigate: (route: WorkspaceRoute) => void;
+  onOpenPublicPolicy: (slug?: string | null) => void;
   onSignOut: () => void;
 }) {
   const {
@@ -1313,6 +991,41 @@ function AccountPages({
             {savingSettings ? 'Saving...' : 'Save Settings'}
           </button>
         </form>
+
+        <div className="pt-3 border-t border-[#e1e8f2] flex flex-wrap items-center gap-3 text-[12px] text-[#5b6d85]">
+          <span>Governance:</span>
+          <button
+            type="button"
+            onClick={() => onNavigate('my-policies')}
+            className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+          >
+            My Accepted Policies
+          </button>
+          <span>·</span>
+          <button
+            type="button"
+            onClick={() => onOpenPublicPolicy('privacy')}
+            className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+          >
+            Privacy Policy
+          </button>
+          <span>·</span>
+          <button
+            type="button"
+            onClick={() => onOpenPublicPolicy('data-deletion')}
+            className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+          >
+            Data Deletion Policy
+          </button>
+          <span>·</span>
+          <button
+            type="button"
+            onClick={() => onOpenPublicPolicy('account-security')}
+            className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+          >
+            Security Rules
+          </button>
+        </div>
       </div>
     );
   }

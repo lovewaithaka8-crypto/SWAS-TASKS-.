@@ -42,6 +42,7 @@ interface WorkerPagesProps {
   onSelectTask: (task: MarketplaceTask) => void;
   onNavigate: (route: WorkspaceRoute) => void;
   onOpenChat: (conversationId: string) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }
 
 export function WorkerPages({
@@ -56,6 +57,7 @@ export function WorkerPages({
   onSelectTask,
   onNavigate,
   onOpenChat,
+  onOpenPublicPolicy,
 }: WorkerPagesProps) {
   if (route === 'dashboard') {
     return (
@@ -67,6 +69,7 @@ export function WorkerPages({
         transactions={transactions}
         onSelectTask={onSelectTask}
         onNavigate={onNavigate}
+        onOpenPublicPolicy={onOpenPublicPolicy}
       />
     );
   }
@@ -89,6 +92,7 @@ export function WorkerPages({
         onSelectTask={onSelectTask}
         onNavigate={onNavigate}
         onOpenChat={onOpenChat}
+        onOpenPublicPolicy={onOpenPublicPolicy}
       />
     );
   }
@@ -98,6 +102,7 @@ export function WorkerPages({
         workerAssignments={workerAssignments}
         onNavigate={onNavigate}
         onOpenChat={onOpenChat}
+        onOpenPublicPolicy={onOpenPublicPolicy}
       />
     );
   }
@@ -131,6 +136,7 @@ function WorkerOverview({
   transactions,
   onSelectTask,
   onNavigate,
+  onOpenPublicPolicy,
 }: {
   publicTasks: MarketplaceTask[];
   workerBids: TaskBid[];
@@ -139,6 +145,7 @@ function WorkerOverview({
   transactions: LedgerTransaction[];
   onSelectTask: (task: MarketplaceTask) => void;
   onNavigate: (route: WorkspaceRoute) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }) {
   const { userPrivate } = useAuth();
   const openTasks = useMemo(() => publicTasks.filter((t) => t.status === 'open'), [publicTasks]);
@@ -230,6 +237,26 @@ function WorkerOverview({
           <p className="swas-body mt-1">
             Browse live open briefs, track your KES proposals, and submit completed deliverables.
           </p>
+          {onOpenPublicPolicy && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[#5b6d85]">
+              <span>Governance:</span>
+              <button
+                type="button"
+                onClick={() => onOpenPublicPolicy('workplace-operating-rules')}
+                className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+              >
+                Workplace Operating Rules
+              </button>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={() => onOpenPublicPolicy('earnings')}
+                className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+              >
+                Earnings Policy
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2.5 shrink-0">
           <button
@@ -617,12 +644,14 @@ function WorkerBidsView({
   onSelectTask,
   onNavigate,
   onOpenChat,
+  onOpenPublicPolicy,
 }: {
   workerBids: TaskBid[];
   publicTasks: MarketplaceTask[];
   onSelectTask: (task: MarketplaceTask) => void;
   onNavigate: (route: WorkspaceRoute) => void;
   onOpenChat: (conversationId: string) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }) {
   const { firebaseUser, userPrivate } = useAuth();
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'accepted' | 'rejected' | 'withdrawn'>('all');
@@ -679,13 +708,24 @@ function WorkerBidsView({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => onNavigate('browse-tasks')}
-          className="px-3.5 py-2 swas-btn-text swas-btn-primary rounded-[9px] cursor-pointer"
-        >
-          Find More Tasks
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          {onOpenPublicPolicy && (
+            <button
+              type="button"
+              onClick={() => onOpenPublicPolicy('task-participation')}
+              className="text-[12px] font-medium text-[#1265c8] hover:underline cursor-pointer"
+            >
+              Task Participation Policy
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onNavigate('browse-tasks')}
+            className="px-3.5 py-2 swas-btn-text swas-btn-primary rounded-[9px] cursor-pointer"
+          >
+            Find More Tasks
+          </button>
+        </div>
       </div>
 
       {feedback && (
@@ -786,10 +826,12 @@ function WorkerAssignmentsView({
   workerAssignments,
   onNavigate,
   onOpenChat,
+  onOpenPublicPolicy,
 }: {
   workerAssignments: TaskAssignment[];
   onNavigate: (route: WorkspaceRoute) => void;
   onOpenChat: (conversationId: string) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }) {
   const { firebaseUser, userPrivate } = useAuth();
   const activeList = useMemo(
@@ -981,6 +1023,27 @@ function WorkerAssignmentsView({
                         className="w-full px-3 py-2 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
                       />
                     </div>
+                    {onOpenPublicPolicy && (
+                      <p className="text-[12px] text-[#5b6d85]">
+                        Submissions must comply with our{' '}
+                        <button
+                          type="button"
+                          onClick={() => onOpenPublicPolicy('task-submission')}
+                          className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+                        >
+                          Task Submission Policy
+                        </button>{' '}
+                        and{' '}
+                        <button
+                          type="button"
+                          onClick={() => onOpenPublicPolicy('task-quality-standards')}
+                          className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+                        >
+                          Task Quality Standards
+                        </button>
+                        .
+                      </p>
+                    )}
                     <div className="flex items-center gap-2.5">
                       <button
                         type="submit"

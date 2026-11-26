@@ -4,8 +4,11 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
-import { getApp, getApps, initializeApp } from 'firebase-admin/app';
-import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
+import { type DecodedIdToken } from 'firebase-admin/auth';
+import { adminAuth, adminDb } from './server/lib/firebaseAdmin';
+import { registerOperationalRoutes } from './server/routes/operationalRoutes';
+import { runScheduledMaintenanceSweep } from './server/cron/reviewEngine';
+import { getAllProviderStatuses, getProviderModule } from './server/providers/index';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,25 +58,7 @@ const ALLOWED_CATEGORIES = new Set([
   'test_email',
 ]);
 
-interface FirebaseConfigFile {
-  projectId: string;
-}
-
-function loadFirebaseProjectId(): string {
-  const configPath = path.resolve(__dirname, 'firebase-applet-config.json');
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  const parsed = JSON.parse(raw) as FirebaseConfigFile;
-  if (!parsed.projectId) {
-    throw new Error('firebase-applet-config.json is missing projectId');
-  }
-  return parsed.projectId;
-}
-
-const firebaseProjectId = loadFirebaseProjectId();
-const adminApp = getApps().length
-  ? getApp()
-  : initializeApp({ projectId: firebaseProjectId });
-const adminAuth = getAuth(adminApp);
+// Firebase Admin SDK initialized cleanly via ./server/lib/firebaseAdmin (swas-tasks-control-centre target)
 
 interface AuthenticatedRequest extends Request {
   authToken?: DecodedIdToken;
@@ -117,18 +102,29 @@ async function requireVerifiedAuth(
   }
 }
 
-function requireSuperAdmin(
+async function requireSuperAdmin(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
-): void {
-  if (!isSuperAdminToken(req.authToken)) {
-    res.status(403).json({
-      error: 'Super Administrator authorization is required for SWAS TASKS Central Control Centre.',
-    });
+): Promise<void> {
+  if (isSuperAdminToken(req.authToken)) {
+    next();
     return;
   }
-  next();
+  if (req.authToken?.uid && req.authToken.email_verified === true) {
+    try {
+      const snap = await adminDb.collection('admins').doc(req.authToken.uid).get();
+      if (snap.exists) {
+        next();
+        return;
+      }
+    } catch {
+      // fall through to 403
+    }
+  }
+  res.status(403).json({
+    error: 'Super Administrator authorization is required for SWAS TASKS Central Control Centre.',
+  });
 }
 
 interface SmtpSettings {
@@ -243,9 +239,209 @@ function buildDnsGuidance(smtp: SmtpSettings) {
   };
 }
 
+const processedIdempotencyKeys = new Map<string, { status: string; message: string; at: number }>();
+
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '64kb' }));
+
+  // Raw body parser exclusively for cryptographic webhook signature verification
+  app.post(
+    '/api/financial/webhooks/:provider',
+    express.raw({ type: 'application/json', limit: '128kb' }),
+    (req: Request, res: Response) => {
+      const providerId = String(req.params.provider || '').trim().toLowerCase();
+      const mod = getProviderModule(providerId);
+      if (!mod) {
+        res.status(404).json({ received: false, error: 'Unsupported payment provider.' });
+        return;
+      }
+      if (!mod.isConfigured()) {
+        res.status(503).json({
+          received: false,
+          error: `${mod.name} webhook secret is not configured.`,
+        });
+        return;
+      }
+      const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from('');
+      const check = mod.verifyWebhookSignature(rawBody, req.headers);
+      if (!check.verified) {
+        res.status(401).json({ received: false, error: check.reason || 'Signature verification failed.' });
+        return;
+      }
+      res.json({ received: true, verified: true, provider: mod.id, eventType: check.eventType || 'verified' });
+    }
+  );
+
+  app.use(express.json({ limit: '128kb' }));
+
+  // Mount Operational Platform Routes (Registration Approval, Dual-Source Tasks, 90m Engine, Ledger, Withdrawals, Reports)
+  registerOperationalRoutes(app);
+
+  app.get(
+    '/api/financial/providers/status',
+    requireVerifiedAuth,
+    requireSuperAdmin,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const verify = req.query.verify === 'true';
+      const providers = await getAllProviderStatuses(verify);
+      res.json({ providers });
+    }
+  );
+
+  app.post(
+    '/api/financial/payouts/initiate',
+    requireVerifiedAuth,
+    requireSuperAdmin,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const body = (req.body || {}) as {
+        providerKey?: string;
+        withdrawalId?: string;
+        amount?: number;
+        currency?: string;
+        destination?: string;
+        recipientName?: string;
+        institutionId?: string;
+        idempotencyKey?: string;
+        cryptoNetwork?: string;
+      };
+
+      const providerKey = String(body.providerKey || '').trim().toLowerCase();
+      const idempotencyKey = String(body.idempotencyKey || '').trim();
+      const withdrawalId = String(body.withdrawalId || '').trim();
+      const amount = Number(body.amount || 0);
+      const currency = String(body.currency || 'KES').trim().toUpperCase();
+      const destination = String(body.destination || '').trim();
+      const recipientName = String(body.recipientName || '').trim();
+      const institutionId = String(body.institutionId || '').trim();
+
+      if (!withdrawalId || !idempotencyKey || !Number.isFinite(amount) || amount <= 0 || !destination) {
+        res.status(400).json({
+          dispatched: false,
+          error: 'withdrawalId, idempotencyKey, valid amount, and destination are required.',
+        });
+        return;
+      }
+
+      const existingIdem = processedIdempotencyKeys.get(idempotencyKey);
+      if (existingIdem) {
+        res.status(409).json({
+          dispatched: false,
+          duplicate: true,
+          status: existingIdem.status,
+          error: `Duplicate idempotency key detected (${existingIdem.message}).`,
+        });
+        return;
+      }
+
+      const mod = getProviderModule(providerKey);
+      if (!mod) {
+        res.status(501).json({
+          dispatched: false,
+          code: 'MANUAL_PAYOUT_REQUIRED',
+          status: 'manual_required',
+          error: 'This institution uses manual finance settlement. Mark as paid only after settling externally and recording a real reference.',
+        });
+        return;
+      }
+
+      if (!mod.isConfigured()) {
+        res.status(503).json({
+          dispatched: false,
+          code: 'PROVIDER_NOT_CONFIGURED',
+          status: 'not_configured',
+          error: `${mod.name} API credentials are not configured on this server.`,
+        });
+        return;
+      }
+
+      const result = await mod.initiatePayout({
+        withdrawalId,
+        amount,
+        currency,
+        destination,
+        recipientName,
+        institutionId,
+        idempotencyKey,
+        cryptoNetwork: body.cryptoNetwork,
+      });
+
+      if (!result.dispatched) {
+        res.status(result.status === 'not_configured' ? 503 : 501).json({
+          dispatched: false,
+          code: result.status === 'not_configured' ? 'PROVIDER_NOT_CONFIGURED' : 'MANUAL_PAYOUT_REQUIRED',
+          status: result.status,
+          error: result.message,
+        });
+        return;
+      }
+
+      processedIdempotencyKeys.set(idempotencyKey, {
+        status: result.status,
+        message: result.message,
+        at: Date.now(),
+      });
+      res.json(result);
+    }
+  );
+
+  app.get(
+    '/api/financial/exchange-rates',
+    requireVerifiedAuth,
+    async (req: AuthenticatedRequest, res: Response) => {
+      const base = String(req.query.base || 'KES').trim().toUpperCase().replace(/[^A-Z]/g, '');
+      const apiKey = (process.env.EXCHANGE_RATE_API_KEY || '').trim();
+      if (!apiKey) {
+        res.json({
+          available: false,
+          base,
+          reason:
+            'No verified exchange rate API is configured. Balances remain strictly isolated in each currency without conversion.',
+        });
+        return;
+      }
+      try {
+        const resp = await fetch(
+          `https://v6.exchangerate-api.com/v6/${encodeURIComponent(apiKey)}/latest/${encodeURIComponent(base)}`
+        );
+        if (!resp.ok) {
+          res.json({
+            available: false,
+            base,
+            reason: `Verified exchange rate source returned HTTP ${resp.status}.`,
+          });
+          return;
+        }
+        const data = (await resp.json()) as { result?: string; conversion_rates?: Record<string, number> };
+        if (data.result !== 'success' || !data.conversion_rates) {
+          res.json({
+            available: false,
+            base,
+            reason: 'Exchange rate provider response unavailable.',
+          });
+          return;
+        }
+        res.json({
+          available: true,
+          base,
+          rates: {
+            KES: data.conversion_rates.KES,
+            UGX: data.conversion_rates.UGX,
+            TZS: data.conversion_rates.TZS,
+            RWF: data.conversion_rates.RWF,
+            NGN: data.conversion_rates.NGN,
+            USD: data.conversion_rates.USD,
+          },
+          fetchedAt: new Date().toISOString(),
+        });
+      } catch {
+        res.json({
+          available: false,
+          base,
+          reason: 'Unable to reach verified exchange rate source.',
+        });
+      }
+    }
+  );
 
   app.get(
     '/api/email/status',
@@ -506,6 +702,14 @@ async function startServer() {
   const port = Number(process.env.PORT || 3000);
   app.listen(port, '0.0.0.0', () => {
     console.log(`SWAS TASKS server running on http://0.0.0.0:${port}`);
+    // Non-blocking background scheduler for 90-minute auto-approval & task expiration sweeps
+    setInterval(() => {
+      void runScheduledMaintenanceSweep('scheduler').then((summary) => {
+        if (!summary.ok && !summary.blockedByPermissions && summary.error) {
+          console.warn('[90m Review Engine]', summary.error);
+        }
+      });
+    }, 60_000);
   });
 }
 

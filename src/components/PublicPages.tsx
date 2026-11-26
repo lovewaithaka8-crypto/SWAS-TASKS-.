@@ -1,15 +1,22 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, Search, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { formatKes } from '../lib/validation';
+import { formatKes, normalizeUsername, validatePhoneNumber, validateUsername } from '../lib/validation';
+import { checkUsernameAvailability } from '../lib/operationalService';
 import {
   TASK_CATEGORIES,
   type AppRoute,
   type MarketplaceTask,
+  type PolicyAcceptanceRecord,
+  type PolicyCategory,
+  type PolicyDocument,
+  type PolicyRevision,
   type PublicRoute,
   type TaskCategory,
   type UserRole,
 } from '../types/marketplace';
+import { resolvePolicyBySlug, SIGNUP_REQUIRED_POLICY_SLUGS } from '../lib/policies';
+import { PolicyCentreView, PolicyReaderModal } from './PolicyCentrePages';
 import { ResilientImage } from './ResilientImage';
 
 const HERO_IMG = '/src/assets/images/hero_marketplace_workspace_1795470718131.jpg';
@@ -29,6 +36,12 @@ interface PublicPagesProps {
   route: PublicRoute;
   tasks: MarketplaceTask[];
   tasksLoading: boolean;
+  policyCategories: PolicyCategory[];
+  policies: PolicyDocument[];
+  policyRevisions: PolicyRevision[];
+  userAcceptances: PolicyAcceptanceRecord[];
+  activePolicySlug: string | null;
+  onOpenPolicy: (slug?: string | null) => void;
   onNavigate: (route: AppRoute) => void;
   onSelectTask: (task: MarketplaceTask) => void;
 }
@@ -37,6 +50,12 @@ export function PublicPages({
   route,
   tasks,
   tasksLoading,
+  policyCategories,
+  policies,
+  policyRevisions,
+  userAcceptances,
+  activePolicySlug,
+  onOpenPolicy,
   onNavigate,
   onSelectTask,
 }: PublicPagesProps) {
@@ -91,12 +110,33 @@ export function PublicPages({
       <AuthView
         mode={route}
         initialRole={preferredSignupRole}
+        policies={policies}
+        onOpenPolicy={onOpenPolicy}
         onNavigate={onNavigate}
       />
     );
   }
-  if (route === 'terms' || route === 'privacy' || route === 'refund') {
-    return <PolicyView kind={route} onNavigate={onNavigate} />;
+  if (route === 'policies' || route === 'terms' || route === 'privacy' || route === 'refund') {
+    const resolvedSlug =
+      route === 'terms'
+        ? 'terms-and-conditions'
+        : route === 'privacy'
+        ? 'privacy'
+        : route === 'refund'
+        ? 'refund'
+        : activePolicySlug;
+    return (
+      <PolicyCentreView
+        categories={policyCategories}
+        policies={policies}
+        revisions={policyRevisions}
+        userAcceptances={userAcceptances}
+        activeSlug={resolvedSlug}
+        onOpenPolicy={(slug) => onOpenPolicy(slug)}
+        onBackToLibrary={() => onOpenPolicy(null)}
+        onGoSignIn={() => onNavigate('login')}
+      />
+    );
   }
 
   return null;
@@ -682,10 +722,14 @@ function GoogleLogo() {
 function AuthView({
   mode,
   initialRole,
+  policies,
+  onOpenPolicy,
   onNavigate,
 }: {
   mode: 'login' | 'signup' | 'forgot-password';
   initialRole: UserRole;
+  policies: PolicyDocument[];
+  onOpenPolicy: (slug?: string | null) => void;
   onNavigate: (route: AppRoute) => void;
 }) {
   const {
@@ -707,11 +751,50 @@ function AuthView({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkingUsername, setCheckingUsername] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [country, setCountry] = useState('KE');
   const [businessName, setBusinessName] = useState('');
   const [role, setRole] = useState<UserRole>(initialRole);
   const [linkPassword, setLinkPassword] = useState('');
+  const [acceptCorePolicies, setAcceptCorePolicies] = useState(false);
+  const [acceptFinancialPolicies, setAcceptFinancialPolicies] = useState(false);
+  const [modalPolicy, setModalPolicy] = useState<PolicyDocument | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const handleUsernameBlur = async () => {
+    const clean = normalizeUsername(username);
+    if (!clean || validateUsername(clean)) {
+      setUsernameAvailable(null);
+      return;
+    }
+    setCheckingUsername(true);
+    const available = await checkUsernameAvailability(clean);
+    setUsernameAvailable(available);
+    setCheckingUsername(false);
+  };
+
+  const signupPolicies = useMemo(
+    () =>
+      SIGNUP_REQUIRED_POLICY_SLUGS.map((slug) => resolvePolicyBySlug(policies, slug)).filter(
+        (p): p is PolicyDocument => Boolean(p)
+      ),
+    [policies]
+  );
+
+  const openModalBySlug = (slug: string) => {
+    const docItem = resolvePolicyBySlug(policies, slug);
+    if (docItem) setModalPolicy(docItem);
+  };
+
+  const buildAcceptedPayload = () =>
+    signupPolicies.map((policy) => ({
+      policy,
+      context: 'registration_signup',
+    }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -735,6 +818,32 @@ function AuthView({
       return;
     }
 
+    if (!acceptCorePolicies || !acceptFinancialPolicies) {
+      setLocalError(
+        'Please read and actively accept both the SWAS TASKS Legal & Conduct Policies and the Earnings & Withdrawals Policies before creating an account.'
+      );
+      return;
+    }
+
+    const unameErr = validateUsername(username);
+    if (unameErr) {
+      setLocalError(unameErr);
+      return;
+    }
+    const cleanUname = normalizeUsername(username);
+    const isAvail = await checkUsernameAvailability(cleanUname);
+    setUsernameAvailable(isAvail);
+    if (!isAvail) {
+      setLocalError(`Username "@${cleanUname}" is already registered. Choose another unique username.`);
+      return;
+    }
+
+    const phoneErr = validatePhoneNumber(phone);
+    if (phoneErr) {
+      setLocalError(phoneErr);
+      return;
+    }
+
     if (password !== confirmPassword) {
       setLocalError('Passwords do not match. Please confirm your password.');
       return;
@@ -744,8 +853,12 @@ function AuthView({
       email,
       password,
       displayName,
+      username: cleanUname,
+      phone: phone.trim(),
+      country,
       role,
       businessName,
+      acceptedPolicies: buildAcceptedPayload(),
     });
     if (ok) {
       onNavigate('dashboard');
@@ -755,12 +868,41 @@ function AuthView({
   const handleGoogle = async () => {
     setLocalError(null);
     setNotice(null);
+    if (mode === 'signup') {
+      if (!acceptCorePolicies || !acceptFinancialPolicies) {
+        setLocalError(
+          'Please read and check both policy acceptance boxes before continuing with Google Sign-Up.'
+        );
+        return;
+      }
+      const unameErr = validateUsername(username);
+      if (unameErr) {
+        setLocalError(unameErr);
+        return;
+      }
+      const cleanUname = normalizeUsername(username);
+      const isAvail = await checkUsernameAvailability(cleanUname);
+      setUsernameAvailable(isAvail);
+      if (!isAvail) {
+        setLocalError(`Username "@${cleanUname}" is already taken. Choose another unique username.`);
+        return;
+      }
+      const phoneErr = validatePhoneNumber(phone);
+      if (phoneErr) {
+        setLocalError(phoneErr);
+        return;
+      }
+    }
     const ok = await signInWithGoogle(
       mode === 'signup'
         ? {
             role,
             displayName: displayName.trim() || undefined,
+            username: normalizeUsername(username),
+            phone: phone.trim(),
+            country,
             businessName: role === 'client' ? businessName.trim() || undefined : undefined,
+            acceptedPolicies: buildAcceptedPayload(),
           }
         : undefined,
       rememberMe
@@ -922,6 +1064,77 @@ function AuthView({
                     />
                   </div>
 
+                  <div>
+                    <label htmlFor="auth-username" className="block swas-label mb-1.5">
+                      Unique Username
+                    </label>
+                    <input
+                      id="auth-username"
+                      type="text"
+                      required
+                      minLength={3}
+                      maxLength={30}
+                      value={username}
+                      onChange={(e) => {
+                        setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''));
+                        setUsernameAvailable(null);
+                      }}
+                      onBlur={() => void handleUsernameBlur()}
+                      placeholder="e.g., amina_o"
+                      className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
+                    />
+                    <p className="mt-1 text-[11px] text-[#5b6d85]">
+                      {checkingUsername
+                        ? 'Checking username availability...'
+                        : usernameAvailable === true
+                        ? `Username @${normalizeUsername(username)} is available.`
+                        : usernameAvailable === false
+                        ? `Username @${normalizeUsername(username)} is already taken.`
+                        : '3–30 lowercase letters, numbers, or underscores.'}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="auth-phone" className="block swas-label mb-1.5">
+                        Phone Number
+                      </label>
+                      <input
+                        id="auth-phone"
+                        type="tel"
+                        required
+                        minLength={7}
+                        maxLength={24}
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="+254 712 345 678"
+                        className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="auth-country" className="block swas-label mb-1.5">
+                        Country
+                      </label>
+                      <select
+                        id="auth-country"
+                        value={country}
+                        onChange={(e) => setCountry(e.target.value)}
+                        className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
+                      >
+                        <option value="KE">Kenya (KE)</option>
+                        <option value="UG">Uganda (UG)</option>
+                        <option value="TZ">Tanzania (TZ)</option>
+                        <option value="RW">Rwanda (RW)</option>
+                        <option value="NG">Nigeria (NG)</option>
+                        <option value="GH">Ghana (GH)</option>
+                        <option value="ZA">South Africa (ZA)</option>
+                        <option value="GB">United Kingdom (GB)</option>
+                        <option value="US">United States (US)</option>
+                        <option value="OTHER">Other International</option>
+                      </select>
+                    </div>
+                  </div>
+
                   {role === 'client' && (
                     <div>
                       <label htmlFor="auth-biz" className="block swas-label mb-1.5">
@@ -1017,6 +1230,76 @@ function AuthView({
                 </div>
               )}
 
+              {mode === 'signup' && (
+                <div className="p-3.5 rounded-[10px] bg-[#f7faff] border border-[#d7e2ef] space-y-2.5 text-[12px] text-[#2a3f5d]">
+                  <p className="font-semibold text-[#102b50]">
+                    Required Legal & Governance Acceptance
+                  </p>
+                  <label className="flex items-start gap-2.5 cursor-pointer leading-relaxed">
+                    <input
+                      type="checkbox"
+                      checked={acceptCorePolicies}
+                      onChange={(e) => setAcceptCorePolicies(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-[#b8c7da] text-[#1265c8]"
+                    />
+                    <span>
+                      I have read and actively accept the{' '}
+                      <button
+                        type="button"
+                        onClick={() => openModalBySlug('terms-and-conditions')}
+                        className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+                      >
+                        Terms & Conditions
+                      </button>
+                      ,{' '}
+                      <button
+                        type="button"
+                        onClick={() => openModalBySlug('privacy')}
+                        className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+                      >
+                        Privacy Policy
+                      </button>
+                      , and{' '}
+                      <button
+                        type="button"
+                        onClick={() => openModalBySlug('user-conduct')}
+                        className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+                      >
+                        User Conduct Policy
+                      </button>
+                      .
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer leading-relaxed">
+                    <input
+                      type="checkbox"
+                      checked={acceptFinancialPolicies}
+                      onChange={(e) => setAcceptFinancialPolicies(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded border-[#b8c7da] text-[#1265c8]"
+                    />
+                    <span>
+                      I have read and agree to the{' '}
+                      <button
+                        type="button"
+                        onClick={() => openModalBySlug('earnings')}
+                        className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+                      >
+                        Earnings Policy
+                      </button>{' '}
+                      and{' '}
+                      <button
+                        type="button"
+                        onClick={() => openModalBySlug('withdrawals')}
+                        className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+                      >
+                        Withdrawal Governance Rules
+                      </button>
+                      .
+                    </span>
+                  </label>
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={signingIn}
@@ -1060,6 +1343,40 @@ function AuthView({
           </>
         )}
 
+        {mode === 'login' && (
+          <div className="mt-4 pt-3 border-t border-[#eef2f7] text-center text-[12px] text-[#5b6d85] space-x-2">
+            <span>Review rules:</span>
+            <button
+              type="button"
+              onClick={() => onOpenPolicy(null)}
+              className="text-[#1265c8] font-medium hover:underline cursor-pointer"
+            >
+              Policy Centre
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => onOpenPolicy('account-security')}
+              className="text-[#1265c8] font-medium hover:underline cursor-pointer"
+            >
+              Account Security
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => onOpenPolicy('privacy')}
+              className="text-[#1265c8] font-medium hover:underline cursor-pointer"
+            >
+              Privacy
+            </button>
+          </div>
+        )}
+
+        <PolicyReaderModal
+          policy={modalPolicy}
+          onClose={() => setModalPolicy(null)}
+        />
+
         <div className="mt-5 pt-4 border-t border-[#e1e8f2] text-center swas-desc">
           {mode === 'signup' ? (
             <>
@@ -1094,67 +1411,6 @@ function AuthView({
               </button>
             </>
           )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PolicyView({
-  kind,
-  onNavigate,
-}: {
-  kind: 'terms' | 'privacy' | 'refund';
-  onNavigate: (route: AppRoute) => void;
-}) {
-  const content = {
-    terms: {
-      title: 'Terms of Service',
-      body: [
-        'Clients posting tasks on SWAS TASKS must state clear deliverable criteria, realistic deadlines, and accurate budgets in Kenyan Shillings (KES).',
-        'Workers must submit genuine, original proposals and deliverables matching agreed assignment specifications.',
-        'Accepted bids become binding assignments. Final ledger settlement is subject to client approval and backend payment-provider verification.',
-      ],
-    },
-    privacy: {
-      title: 'Privacy Policy',
-      body: [
-        'Private contact numbers, notification preferences, and account settings are isolated inside user-owned Firestore documents.',
-        'Public marketplace profiles expose only your display name, role, bio, and optional skills or business name.',
-      ],
-    },
-    refund: {
-      title: 'Refund & Settlement Policy',
-      body: [
-        'Clients review submitted deliverables and may request revisions before approving an assignment.',
-        'No payment is marked settled without confirmed backend payment-provider verification.',
-      ],
-    },
-  }[kind];
-
-  return (
-    <div className="max-w-3xl mx-auto px-5 pt-10">
-      <div className="swas-card rounded-[13px] p-8 space-y-4">
-        <h1 className="swas-heading-page">{content.title}</h1>
-        {content.body.map((p, idx) => (
-          <p key={idx} className="swas-body">
-            {p}
-          </p>
-        ))}
-        <p className="swas-desc pt-2 border-t border-[#e1e8f2]">
-          Official correspondence and policy inquiries:{' '}
-          <a href="mailto:swastaskorg@gmail.com" className="swas-link font-semibold hover:underline">
-            swastaskorg@gmail.com
-          </a>
-        </p>
-        <div className="pt-4">
-          <button
-            type="button"
-            onClick={() => onNavigate('home')}
-            className="text-[14px] font-semibold swas-link hover:underline cursor-pointer"
-          >
-            Back to Home
-          </button>
         </div>
       </div>
     </div>

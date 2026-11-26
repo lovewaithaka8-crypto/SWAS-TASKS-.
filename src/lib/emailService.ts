@@ -63,25 +63,39 @@ async function writeEmailDeliveryLog(params: {
   providerMessageId?: string;
   errorMessage?: string;
 }): Promise<void> {
+  const currentUser = auth.currentUser;
+  if (!currentUser || !currentUser.emailVerified || currentUser.uid !== params.actorId) {
+    return;
+  }
+
+  const recipientEmail = cleanText(params.recipientEmail, 254);
+  const category = cleanText(params.category, 64);
+  const subject = cleanText(params.subject, 200) || '[SWAS TASKS] Notification';
+  if (recipientEmail.length < 3 || category.length < 2 || subject.length < 2) {
+    return;
+  }
+
   const logId = generateEmailLogId();
   const payload: Record<string, unknown> = {
-    actorId: params.actorId,
+    actorId: currentUser.uid,
     surface: params.surface,
-    category: cleanText(params.category, 64),
-    recipientEmail: cleanText(params.recipientEmail, 254),
+    category,
+    recipientEmail,
     senderEmail: OFFICIAL_EMAIL_IDENTITY.officialEmail,
     senderName: OFFICIAL_EMAIL_IDENTITY.senderName,
     replyToEmail: OFFICIAL_EMAIL_IDENTITY.replyTo,
-    subject: cleanText(params.subject, 200) || '[SWAS TASKS] Notification',
+    subject,
     status: params.status,
     createdAt: serverTimestamp(),
   };
 
   if (params.providerMessageId) {
-    payload.providerMessageId = cleanText(params.providerMessageId, 200);
+    const cleanMsgId = cleanText(params.providerMessageId, 200);
+    if (cleanMsgId) payload.providerMessageId = cleanMsgId;
   }
   if (params.errorMessage) {
-    payload.errorMessage = cleanText(params.errorMessage, 500);
+    const cleanErr = cleanText(params.errorMessage, 500);
+    if (cleanErr) payload.errorMessage = cleanErr;
   }
 
   try {
@@ -122,7 +136,16 @@ export async function sendTestEmailFromControlCentre(
   user: User,
   recipientEmail: string
 ): Promise<EmailDispatchResult> {
-  const token = await user.getIdToken();
+  const currentUser = auth.currentUser;
+  if (!currentUser || !currentUser.emailVerified || currentUser.uid !== user.uid) {
+    return {
+      sent: false,
+      status: 'failed',
+      error: 'Active verified administrator session is required.',
+    };
+  }
+
+  const token = await currentUser.getIdToken();
   const subject = '[SWAS TASKS] Central Control Centre Verification Test Email';
   let result: EmailDispatchResult;
 
@@ -164,7 +187,7 @@ export async function sendTestEmailFromControlCentre(
   }
 
   await writeEmailDeliveryLog({
-    actorId: user.uid,
+    actorId: currentUser.uid,
     surface: 'control_centre',
     category: 'test_email',
     recipientEmail,
@@ -185,14 +208,19 @@ export async function dispatchPlatformEmail(params: {
   subject?: string;
   bodyText: string;
 }): Promise<EmailDispatchResult> {
-  const activeUser = params.user || auth.currentUser;
+  const activeUser = auth.currentUser;
   const catDef = EMAIL_CATEGORY_MAP[params.category];
   const resolvedSubject = cleanText(
     params.subject || catDef?.defaultSubject || '[SWAS TASKS] Platform Notification',
     200
   );
 
-  if (!activeUser || !activeUser.emailVerified || !params.recipientEmail) {
+  if (
+    !activeUser ||
+    !activeUser.emailVerified ||
+    (params.user && params.user.uid !== activeUser.uid) ||
+    !params.recipientEmail
+  ) {
     return {
       sent: false,
       status: 'failed',

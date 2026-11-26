@@ -34,6 +34,7 @@ interface ControlCentrePagesProps {
   emailSettings: CentralEmailSettings;
   emailLogs: EmailDeliveryLog[];
   onNavigate: (route: WorkspaceRoute) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }
 
 export function ControlCentrePages({
@@ -41,6 +42,7 @@ export function ControlCentrePages({
   emailSettings,
   emailLogs,
   onNavigate,
+  onOpenPublicPolicy,
 }: ControlCentrePagesProps) {
   const { firebaseUser, isSuperAdmin } = useAuth();
   const [statusData, setStatusData] = useState<EmailServiceStatusResponse | null>(null);
@@ -87,6 +89,7 @@ export function ControlCentrePages({
         statusError={statusError}
         onRefreshStatus={() => void loadStatus(true)}
         onNavigate={onNavigate}
+        onOpenPublicPolicy={onOpenPublicPolicy}
       />
     );
   }
@@ -175,6 +178,7 @@ function CentralControlCentreOverview({
   statusError,
   onRefreshStatus,
   onNavigate,
+  onOpenPublicPolicy,
 }: {
   emailSettings: CentralEmailSettings;
   emailLogs: EmailDeliveryLog[];
@@ -183,6 +187,7 @@ function CentralControlCentreOverview({
   statusError: string | null;
   onRefreshStatus: () => void;
   onNavigate: (route: WorkspaceRoute) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }) {
   const { firebaseUser } = useAuth();
   const controlCentreCategories = useMemo(
@@ -262,17 +267,42 @@ function CentralControlCentreOverview({
           <h2 className="swas-heading-main mt-0.5">SWAS TASKS CENTRAL CONTROL CENTRE</h2>
           <p className="swas-body mt-1">
             Dispatch verified staff invitations, security alerts, department circulars, and system announcements using official sender{' '}
-            <strong className="text-[#172b46]">{OFFICIAL_EMAIL_IDENTITY.officialEmail}</strong>.
+            <strong className="text-[#172b46]">{OFFICIAL_EMAIL_IDENTITY.officialEmail}</strong>.{' '}
+            {onOpenPublicPolicy && (
+              <button
+                type="button"
+                onClick={() => onOpenPublicPolicy('staff-conduct')}
+                className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+              >
+                Staff & Admin Conduct Policy
+              </button>
+            )}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onNavigate('platform-settings')}
-          className="inline-flex items-center gap-2 px-4 py-2.5 swas-btn-primary swas-btn-text rounded-[9px] whitespace-nowrap shrink-0 cursor-pointer"
-        >
-          <Settings2 className="w-4 h-4" />
-          Platform Email Settings
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => onNavigate('admin-operations')}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#102b50] text-white swas-btn-text rounded-[9px] hover:bg-[#1265c8] whitespace-nowrap cursor-pointer"
+          >
+            Operations &amp; Review Suite
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('policy-control')}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-[#e9f2ff] text-[#1265c8] swas-btn-text rounded-[9px] hover:bg-[#dcebff] whitespace-nowrap cursor-pointer"
+          >
+            Policy Control Centre
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('platform-settings')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 swas-btn-primary swas-btn-text rounded-[9px] whitespace-nowrap cursor-pointer"
+          >
+            <Settings2 className="w-4 h-4" />
+            Platform Email Settings
+          </button>
+        </div>
       </div>
 
       <StatusBanner

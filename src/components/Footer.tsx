@@ -2,10 +2,19 @@ import type { PublicRoute } from '../types/marketplace';
 
 interface FooterProps {
   onNavigate: (route: PublicRoute) => void;
+  onOpenPolicy?: (slug?: string) => void;
 }
 
-export function Footer({ onNavigate }: FooterProps) {
+export function Footer({ onNavigate, onOpenPolicy }: FooterProps) {
   const year = new Date().getFullYear();
+
+  const openDoc = (slug: string, fallback: PublicRoute) => {
+    if (onOpenPolicy) {
+      onOpenPolicy(slug);
+    } else {
+      onNavigate(fallback);
+    }
+  };
 
   return (
     <footer className="mt-20 swas-footer text-[#dce7f5]">
@@ -37,6 +46,9 @@ export function Footer({ onNavigate }: FooterProps) {
             <button type="button" onClick={() => onNavigate('tasks')} className="hover:text-white transition-colors cursor-pointer">
               Browse Tasks
             </button>
+            <button type="button" onClick={() => openDoc('', 'policies')} className="hover:text-white transition-colors cursor-pointer">
+              Policies & Legal Centre
+            </button>
           </div>
         </div>
 
@@ -45,14 +57,23 @@ export function Footer({ onNavigate }: FooterProps) {
             Policies
           </h3>
           <div className="flex flex-col items-start gap-2 text-[14px] font-medium text-[#dce7f5]">
-            <button type="button" onClick={() => onNavigate('terms')} className="hover:text-white transition-colors cursor-pointer">
-              Terms of Service
+            <button type="button" onClick={() => openDoc('terms-and-conditions', 'terms')} className="hover:text-white transition-colors cursor-pointer">
+              Terms & Conditions
             </button>
-            <button type="button" onClick={() => onNavigate('privacy')} className="hover:text-white transition-colors cursor-pointer">
+            <button type="button" onClick={() => openDoc('privacy', 'privacy')} className="hover:text-white transition-colors cursor-pointer">
               Privacy Policy
             </button>
-            <button type="button" onClick={() => onNavigate('refund')} className="hover:text-white transition-colors cursor-pointer">
+            <button type="button" onClick={() => openDoc('user-conduct', 'policies')} className="hover:text-white transition-colors cursor-pointer">
+              User Conduct Rules
+            </button>
+            <button type="button" onClick={() => openDoc('withdrawals', 'policies')} className="hover:text-white transition-colors cursor-pointer">
+              Earnings & Withdrawals
+            </button>
+            <button type="button" onClick={() => openDoc('refund', 'refund')} className="hover:text-white transition-colors cursor-pointer">
               Refund Policy
+            </button>
+            <button type="button" onClick={() => openDoc('appeals', 'policies')} className="hover:text-white transition-colors cursor-pointer">
+              Appeals & Enforcement
             </button>
           </div>
         </div>

@@ -17,6 +17,14 @@ import {
   subscribeCentralEmailSettings,
   subscribeEmailLogs,
 } from './lib/emailService';
+import { buildDefaultFinancialPlatformConfig } from './lib/financialCatalog';
+import {
+  subscribeAllTransactions,
+  subscribeAllWithdrawals,
+  subscribeFinancialAuditLogs,
+  subscribeFinancialConfig,
+  subscribePayoutAccounts,
+} from './lib/financialService';
 import {
   subscribeClientAssignments,
   subscribeClientBids,
@@ -33,24 +41,81 @@ import {
   subscribeWorkerBids,
 } from './lib/marketplaceService';
 import {
+  mergePolicyCatalog,
+  mergePolicyRevisions,
+  subscribeAllPolicyAcceptances,
+  subscribePolicies,
+  subscribePolicyCategories,
+  subscribePolicyRegistry,
+  subscribePolicyRevisions,
+  subscribeRegisteredUsersForAdmin,
+  subscribeUserPolicyAcceptances,
+} from './lib/policyService';
+import { normalizePolicySlug, resolvePolicyBySlug, SIGNUP_REQUIRED_POLICY_SLUGS } from './lib/policies';
+import {
+  checkUsernameAvailability,
+  subscribeAccountApplicationsAdmin,
+  subscribeAllAnnouncementsAdmin,
+  subscribeAllAuditLogsAdmin,
+  subscribeAllCorrectionsAdmin,
+  subscribeAllSecurityEventsAdmin,
+  subscribeAllSubmissionsAdmin,
+  subscribeAllTaskCategoriesAdmin,
+  subscribeAllTasksAdmin,
+  subscribeAllTimersAdmin,
+  subscribeAllWalletLedgerAdmin,
+  subscribeAutoApprovalSettings,
+  subscribePublishedAnnouncements,
+  subscribeTaskCategories,
+  subscribeTaskReservationsForUser,
+  subscribeTaskSourceImportsAdmin,
+  subscribeTaskSourcesAdmin,
+  subscribeTaskSubmissionsForUser,
+  subscribeWalletLedgerForUser,
+} from './lib/operationalService';
+import { normalizeUsername, validatePhoneNumber, validateUsername } from './lib/validation';
+import { PolicyReaderModal } from './components/PolicyCentrePages';
+import {
   ADMIN_ONLY_ROUTES,
   ALL_WORKSPACE_ROUTES,
   CLIENT_ONLY_ROUTES,
   WORKER_ONLY_ROUTES,
+  type AccountApplicationRecord,
+  type AdminAutoApprovalSettings,
+  type Announcement,
   type AppNotification,
   type AppRoute,
   type CentralEmailSettings,
   type Conversation,
   type EmailDeliveryLog,
+  type FinancialAuditLog,
+  type FinancialPlatformConfig,
   type LedgerTransaction,
   type MarketplaceTask,
+  type OperationalAuditLog,
+  type PayoutAccount,
+  type PolicyAcceptanceRecord,
+  type PolicyCategory,
+  type PolicyDocument,
+  type PolicyRegistryManifest,
+  type PolicyRevision,
   type PublicRoute,
   type SavedTaskItem,
+  type SecurityEvent,
   type SupportTicket,
+  type TaskApprovalTimer,
   type TaskAssignment,
   type TaskBid,
+  type TaskCategoryConfig,
+  type TaskCorrection,
+  type TaskReservation,
+  type TaskSourceConfig,
+  type TaskSourceImport,
+  type TaskSubmission,
+  type UserPrivate,
   type UserRole,
   type WalletAccount,
+  type WalletLedgerEntry,
   type WithdrawalRequest,
   type WorkspaceRoute,
 } from './types/marketplace';
@@ -67,22 +132,44 @@ const PUBLIC_ROUTES: PublicRoute[] = [
   'terms',
   'privacy',
   'refund',
+  'policies',
 ];
 
 function isWorkspaceRoute(route: AppRoute): route is WorkspaceRoute {
   return ALL_WORKSPACE_ROUTES.includes(route as WorkspaceRoute);
 }
 
-function parseHashRoute(): AppRoute {
-  const cleaned = window.location.hash.replace(/^#\/?/, '').trim();
-  if (!cleaned) return 'home';
-  if (ALL_WORKSPACE_ROUTES.includes(cleaned as WorkspaceRoute)) {
-    return cleaned as WorkspaceRoute;
+function parseLocation(): { route: AppRoute; policySlug: string | null } {
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  const cleanedHash = window.location.hash.replace(/^#\/?/, '').trim();
+
+  if (pathname === '/policies' || pathname.startsWith('/policies/')) {
+    const slugPart = pathname.slice('/policies'.length).replace(/^\/+/, '');
+    return {
+      route: 'policies',
+      policySlug: slugPart ? normalizePolicySlug(slugPart) : null,
+    };
   }
-  if (PUBLIC_ROUTES.includes(cleaned as PublicRoute)) {
-    return cleaned as PublicRoute;
+
+  if (cleanedHash === 'policies' || cleanedHash.startsWith('policies/')) {
+    const slugPart = cleanedHash.slice('policies'.length).replace(/^\/+/, '');
+    return {
+      route: 'policies',
+      policySlug: slugPart ? normalizePolicySlug(slugPart) : null,
+    };
   }
-  return 'home';
+
+  if (!cleanedHash) return { route: 'home', policySlug: null };
+  if (ALL_WORKSPACE_ROUTES.includes(cleanedHash as WorkspaceRoute)) {
+    return { route: cleanedHash as WorkspaceRoute, policySlug: null };
+  }
+  if (PUBLIC_ROUTES.includes(cleanedHash as PublicRoute)) {
+    if (cleanedHash === 'terms') return { route: 'policies', policySlug: 'terms-and-conditions' };
+    if (cleanedHash === 'privacy') return { route: 'policies', policySlug: 'privacy' };
+    if (cleanedHash === 'refund') return { route: 'policies', policySlug: 'refund' };
+    return { route: cleanedHash as PublicRoute, policySlug: null };
+  }
+  return { route: 'home', policySlug: null };
 }
 
 function toHashString(route: AppRoute): string {
@@ -169,23 +256,73 @@ function EmailVerificationGate({ onSignOut }: { onSignOut: () => void }) {
   );
 }
 
-function RoleOnboardingGate() {
+function RoleOnboardingGate({ policies }: { policies: PolicyDocument[] }) {
   const { firebaseUser, completeOnboarding, logout } = useAuth();
   const [role, setRole] = useState<UserRole>('client');
   const [displayName, setDisplayName] = useState(firebaseUser?.displayName || '');
+  const [username, setUsername] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const [phone, setPhone] = useState('');
+  const [country, setCountry] = useState('KE');
   const [businessName, setBusinessName] = useState('');
+  const [acceptedPoliciesCheck, setAcceptedPoliciesCheck] = useState(false);
+  const [modalPolicy, setModalPolicy] = useState<PolicyDocument | null>(null);
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const requiredDocs = useMemo(
+    () =>
+      SIGNUP_REQUIRED_POLICY_SLUGS.map((s) => resolvePolicyBySlug(policies, s)).filter(
+        (d): d is PolicyDocument => Boolean(d)
+      ),
+    [policies]
+  );
+
+  const handleUsernameBlur = async () => {
+    const err = validateUsername(username);
+    if (err) {
+      setUsernameStatus('idle');
+      return;
+    }
+    setUsernameStatus('checking');
+    const ok = await checkUsernameAvailability(username);
+    setUsernameStatus(ok ? 'available' : 'taken');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const uErr = validateUsername(username);
+    if (uErr) {
+      setErrorMsg(uErr);
+      return;
+    }
+    if (usernameStatus === 'taken') {
+      setErrorMsg(`Username "@${normalizeUsername(username)}" is already taken.`);
+      return;
+    }
+    const pErr = validatePhoneNumber(phone);
+    if (pErr) {
+      setErrorMsg(pErr);
+      return;
+    }
+    if (!acceptedPoliciesCheck) {
+      setErrorMsg('Please review and accept the SWAS TASKS Policies before entering your workspace.');
+      return;
+    }
     setBusy(true);
     setErrorMsg(null);
     try {
       await completeOnboarding({
         role,
         displayName: displayName.trim() || undefined,
+        username: normalizeUsername(username),
+        phone: phone.trim(),
+        country,
         businessName: role === 'client' ? businessName.trim() || undefined : undefined,
+        acceptedPolicies: requiredDocs.map((policy) => ({
+          policy,
+          context: 'google_onboarding',
+        })),
       });
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Unable to save workspace role.');
@@ -202,9 +339,9 @@ function RoleOnboardingGate() {
           <span className="text-[12px] font-semibold uppercase tracking-wide">Workspace Setup</span>
         </div>
         <div>
-          <h1 className="swas-heading-page">Select your SWAS TASKS role</h1>
+          <h1 className="swas-heading-page">Complete your SWAS TASKS profile</h1>
           <p className="mt-1 swas-desc">
-            Choose your permanent workspace experience for this account.
+            Select your permanent workspace role and provide verified contact details.
           </p>
         </div>
 
@@ -238,12 +375,12 @@ function RoleOnboardingGate() {
               }`}
             >
               <span className="block text-[14px] font-semibold">Worker</span>
-              <span className="block swas-desc mt-0.5">Bid & complete tasks</span>
+              <span className="block swas-desc mt-0.5">Claim & complete tasks</span>
             </button>
           </div>
 
           <div>
-            <label className="block swas-label mb-1">Display Name</label>
+            <label className="block swas-label mb-1">Full Name</label>
             <input
               type="text"
               required
@@ -254,6 +391,61 @@ function RoleOnboardingGate() {
               placeholder="Your full name"
               className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px]"
             />
+          </div>
+
+          <div>
+            <label className="block swas-label mb-1">Unique Username</label>
+            <input
+              type="text"
+              required
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setUsernameStatus('idle');
+              }}
+              onBlur={() => void handleUsernameBlur()}
+              placeholder="e.g. jane_doe_ke"
+              className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px]"
+            />
+            {usernameStatus === 'available' && (
+              <p className="text-[11px] text-[#15966b] mt-1">Username available.</p>
+            )}
+            {usernameStatus === 'taken' && (
+              <p className="text-[11px] text-[#d34552] mt-1">Username is already taken.</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block swas-label mb-1">Phone Number</label>
+              <input
+                type="tel"
+                required
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+2547..."
+                className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px]"
+              />
+            </div>
+            <div>
+              <label className="block swas-label mb-1">Country</label>
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="w-full px-3.5 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px]"
+              >
+                <option value="KE">Kenya (KE)</option>
+                <option value="UG">Uganda (UG)</option>
+                <option value="TZ">Tanzania (TZ)</option>
+                <option value="RW">Rwanda (RW)</option>
+                <option value="NG">Nigeria (NG)</option>
+                <option value="GH">Ghana (GH)</option>
+                <option value="ZA">South Africa (ZA)</option>
+                <option value="GB">United Kingdom (GB)</option>
+                <option value="US">United States (US)</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
           </div>
 
           {role === 'client' && (
@@ -272,6 +464,50 @@ function RoleOnboardingGate() {
             </div>
           )}
 
+          <label className="flex items-start gap-2.5 text-[12px] text-[#2a3f5d] p-3 rounded-[9px] bg-[#f8fbff] border border-[#d7e2ef] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={acceptedPoliciesCheck}
+              onChange={(e) => setAcceptedPoliciesCheck(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded border-[#b8c7da] text-[#1265c8]"
+            />
+            <span>
+              I accept the{' '}
+              <button
+                type="button"
+                onClick={() => setModalPolicy(resolvePolicyBySlug(policies, 'terms-and-conditions'))}
+                className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+              >
+                Terms & Conditions
+              </button>
+              ,{' '}
+              <button
+                type="button"
+                onClick={() => setModalPolicy(resolvePolicyBySlug(policies, 'privacy'))}
+                className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+              >
+                Privacy Policy
+              </button>
+              ,{' '}
+              <button
+                type="button"
+                onClick={() => setModalPolicy(resolvePolicyBySlug(policies, 'user-conduct'))}
+                className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+              >
+                User Conduct
+              </button>
+              , and{' '}
+              <button
+                type="button"
+                onClick={() => setModalPolicy(resolvePolicyBySlug(policies, 'earnings'))}
+                className="font-semibold text-[#1265c8] hover:underline cursor-pointer"
+              >
+                Earnings Policy
+              </button>
+              .
+            </span>
+          </label>
+
           <button
             type="submit"
             disabled={busy}
@@ -288,6 +524,7 @@ function RoleOnboardingGate() {
             Sign Out
           </button>
         </form>
+        <PolicyReaderModal policy={modalPolicy} onClose={() => setModalPolicy(null)} />
       </div>
     </div>
   );
@@ -304,7 +541,9 @@ function AppRouter() {
     logout,
   } = useAuth();
 
-  const [route, setRoute] = useState<AppRoute>(() => parseHashRoute());
+  const initialLocation = useMemo(() => parseLocation(), []);
+  const [route, setRoute] = useState<AppRoute>(initialLocation.route);
+  const [activePolicySlug, setActivePolicySlug] = useState<string | null>(initialLocation.policySlug);
   const [publicTasks, setPublicTasks] = useState<MarketplaceTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [selectedTask, setSelectedTask] = useState<MarketplaceTask | null>(null);
@@ -320,6 +559,13 @@ function AppRouter() {
   const [wallet, setWallet] = useState<WalletAccount | null>(null);
   const [transactions, setTransactions] = useState<LedgerTransaction[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [payoutAccounts, setPayoutAccounts] = useState<PayoutAccount[]>([]);
+  const [financialConfig, setFinancialConfig] = useState<FinancialPlatformConfig>(() =>
+    buildDefaultFinancialPlatformConfig()
+  );
+  const [allWithdrawals, setAllWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [allTransactions, setAllTransactions] = useState<LedgerTransaction[]>([]);
+  const [auditLogs, setAuditLogs] = useState<FinancialAuditLog[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -329,18 +575,96 @@ function AppRouter() {
   );
   const [emailLogs, setEmailLogs] = useState<EmailDeliveryLog[]>([]);
 
+  // Policy Centre state
+  const [categoryOverrides, setCategoryOverrides] = useState<PolicyCategory[]>([]);
+  const [policyOverrides, setPolicyOverrides] = useState<PolicyDocument[]>([]);
+  const [policyManifest, setPolicyManifest] = useState<PolicyRegistryManifest | null>(null);
+  const [firestoreRevisions, setFirestoreRevisions] = useState<PolicyRevision[]>([]);
+  const [userAcceptances, setUserAcceptances] = useState<PolicyAcceptanceRecord[]>([]);
+  const [allPolicyAcceptances, setAllPolicyAcceptances] = useState<PolicyAcceptanceRecord[]>([]);
+  const [registeredUsers, setRegisteredUsers] = useState<UserPrivate[]>([]);
+
+  // Operational Centre state
+  const [taskCategories, setTaskCategories] = useState<TaskCategoryConfig[]>([]);
+  const [userSubmissions, setUserSubmissions] = useState<TaskSubmission[]>([]);
+  const [userReservations, setUserReservations] = useState<TaskReservation[]>([]);
+  const [userWalletLedger, setUserWalletLedger] = useState<WalletLedgerEntry[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [autoApprovalSettings, setAutoApprovalSettings] = useState<AdminAutoApprovalSettings>({
+    id: 'autoApproval',
+    enabled: true,
+    reviewWindowMinutes: 90,
+    excludedCategoryIds: [],
+    excludedSourceTypes: [],
+    maxAutoApproveAmountKes: 50000,
+    minAccountAgeDays: 0,
+    updatedBy: 'system',
+    updatedAtMs: 0,
+  });
+
+  // Super Admin Operational Centre state
+  const [adminTasks, setAdminTasks] = useState<MarketplaceTask[]>([]);
+  const [adminTaskCategories, setAdminTaskCategories] = useState<TaskCategoryConfig[]>([]);
+  const [adminSubmissions, setAdminSubmissions] = useState<TaskSubmission[]>([]);
+  const [adminApprovalTimers, setAdminApprovalTimers] = useState<TaskApprovalTimer[]>([]);
+  const [adminTaskSources, setAdminTaskSources] = useState<TaskSourceConfig[]>([]);
+  const [adminSourceImports, setAdminSourceImports] = useState<TaskSourceImport[]>([]);
+  const [accountApplications, setAccountApplications] = useState<AccountApplicationRecord[]>([]);
+  const [operationalAuditLogs, setOperationalAuditLogs] = useState<OperationalAuditLog[]>([]);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
+  const [adminWalletLedger, setAdminWalletLedger] = useState<WalletLedgerEntry[]>([]);
+  const [adminCorrections, setAdminCorrections] = useState<TaskCorrection[]>([]);
+  const [adminAnnouncements, setAdminAnnouncements] = useState<Announcement[]>([]);
+
   useEffect(() => {
-    const onHashChange = () => {
-      setRoute(parseHashRoute());
+    const syncFromUrl = () => {
+      const parsed = parseLocation();
+      setRoute(parsed.route);
+      setActivePolicySlug(parsed.policySlug);
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    window.addEventListener('hashchange', syncFromUrl);
+    window.addEventListener('popstate', syncFromUrl);
+    return () => {
+      window.removeEventListener('hashchange', syncFromUrl);
+      window.removeEventListener('popstate', syncFromUrl);
+    };
   }, []);
 
+  const openPublicPolicy = (slug?: string | null) => {
+    const normalized = slug ? normalizePolicySlug(slug) : null;
+    const targetPath = normalized ? `/policies/${normalized}` : '/policies';
+    if (window.location.pathname !== targetPath || window.location.hash) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setRoute('policies');
+    setActivePolicySlug(normalized);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  };
+
   const navigate = (nextRoute: AppRoute) => {
+    if (nextRoute === 'policies') {
+      openPublicPolicy(null);
+      return;
+    }
+    if (nextRoute === 'terms') {
+      openPublicPolicy('terms-and-conditions');
+      return;
+    }
+    if (nextRoute === 'privacy') {
+      openPublicPolicy('privacy');
+      return;
+    }
+    if (nextRoute === 'refund') {
+      openPublicPolicy('refund');
+      return;
+    }
+
     setRoute(nextRoute);
+    setActivePolicySlug(null);
     const targetHash = toHashString(nextRoute);
-    if (window.location.hash !== targetHash) {
+    if (window.location.pathname !== '/') {
+      window.history.pushState({}, '', `/${targetHash}`);
+    } else if (window.location.hash !== targetHash) {
       window.location.hash = targetHash;
     }
     window.scrollTo({ top: 0, behavior: 'instant' });
@@ -359,6 +683,43 @@ function AppRouter() {
   }, []);
 
   useEffect(() => {
+    const unsubCats = subscribePolicyCategories(isSuperAdmin, setCategoryOverrides);
+    const unsubPols = subscribePolicies(isSuperAdmin, setPolicyOverrides);
+    const unsubReg = subscribePolicyRegistry(setPolicyManifest);
+    const unsubRevs = subscribePolicyRevisions(isSuperAdmin, setFirestoreRevisions);
+    return () => {
+      unsubCats();
+      unsubPols();
+      unsubReg();
+      unsubRevs();
+    };
+  }, [isSuperAdmin]);
+
+  const mergedCatalog = useMemo(
+    () =>
+      mergePolicyCatalog({
+        isAdmin: isSuperAdmin,
+        categoryOverrides,
+        policyOverrides,
+        manifest: policyManifest,
+      }),
+    [isSuperAdmin, categoryOverrides, policyOverrides, policyManifest]
+  );
+
+  const mergedRevisions = useMemo(
+    () => mergePolicyRevisions(firestoreRevisions, isSuperAdmin),
+    [firestoreRevisions, isSuperAdmin]
+  );
+
+  useEffect(() => {
+    if (!authReady || !firebaseUser) {
+      setUserAcceptances([]);
+      return;
+    }
+    return subscribeUserPolicyAcceptances(firebaseUser.uid, setUserAcceptances);
+  }, [authReady, firebaseUser?.uid]);
+
+  useEffect(() => {
     if (!authReady || !firebaseUser || !firebaseUser.emailVerified || !userPrivate) {
       setWorkerBids([]);
       setWorkerAssignments([]);
@@ -369,9 +730,16 @@ function AppRouter() {
       setWallet(null);
       setTransactions([]);
       setWithdrawals([]);
+      setPayoutAccounts([]);
+      setFinancialConfig(buildDefaultFinancialPlatformConfig());
       setConversations([]);
       setNotifications([]);
       setSupportTickets([]);
+      setTaskCategories([]);
+      setUserSubmissions([]);
+      setUserReservations([]);
+      setUserWalletLedger([]);
+      setAnnouncements([]);
       return;
     }
 
@@ -380,9 +748,17 @@ function AppRouter() {
       subscribeWallet(uid, setWallet),
       subscribeTransactions(uid, setTransactions),
       subscribeWithdrawals(uid, setWithdrawals),
+      subscribePayoutAccounts(uid, setPayoutAccounts),
+      subscribeFinancialConfig(setFinancialConfig),
       subscribeConversations(uid, setConversations),
       subscribeNotifications(uid, setNotifications),
       subscribeSupportTickets(uid, setSupportTickets),
+      subscribeTaskCategories(setTaskCategories),
+      subscribeTaskSubmissionsForUser(uid, setUserSubmissions),
+      subscribeTaskReservationsForUser(uid, setUserReservations),
+      subscribeWalletLedgerForUser(uid, setUserWalletLedger),
+      subscribePublishedAnnouncements(setAnnouncements),
+      subscribeAutoApprovalSettings(setAutoApprovalSettings),
     ];
 
     if (userPrivate.role === 'worker') {
@@ -408,13 +784,48 @@ function AppRouter() {
     if (!authReady || !firebaseUser || !isSuperAdmin) {
       setEmailSettings(buildDefaultCentralEmailSettings());
       setEmailLogs([]);
+      setAllWithdrawals([]);
+      setAllTransactions([]);
+      setAuditLogs([]);
+      setAllPolicyAcceptances([]);
+      setRegisteredUsers([]);
+      setAdminTasks([]);
+      setAdminTaskCategories([]);
+      setAdminSubmissions([]);
+      setAdminApprovalTimers([]);
+      setAdminTaskSources([]);
+      setAdminSourceImports([]);
+      setAccountApplications([]);
+      setOperationalAuditLogs([]);
+      setSecurityEvents([]);
+      setAdminWalletLedger([]);
+      setAdminCorrections([]);
+      setAdminAnnouncements([]);
       return;
     }
-    const unsubSettings = subscribeCentralEmailSettings(setEmailSettings);
-    const unsubLogs = subscribeEmailLogs(setEmailLogs);
+    const unsubs = [
+      subscribeCentralEmailSettings(setEmailSettings),
+      subscribeEmailLogs(setEmailLogs),
+      subscribeAllWithdrawals(setAllWithdrawals),
+      subscribeAllTransactions(setAllTransactions),
+      subscribeFinancialAuditLogs(setAuditLogs),
+      subscribeAllPolicyAcceptances(setAllPolicyAcceptances),
+      subscribeRegisteredUsersForAdmin(setRegisteredUsers),
+      subscribeAllTasksAdmin(setAdminTasks),
+      subscribeAllTaskCategoriesAdmin(setAdminTaskCategories),
+      subscribeAllSubmissionsAdmin(setAdminSubmissions),
+      subscribeAllTimersAdmin(setAdminApprovalTimers),
+      subscribeTaskSourcesAdmin(setAdminTaskSources),
+      subscribeTaskSourceImportsAdmin(setAdminSourceImports),
+      subscribeAccountApplicationsAdmin(setAccountApplications),
+      subscribeAllAuditLogsAdmin(setOperationalAuditLogs),
+      subscribeAllSecurityEventsAdmin(setSecurityEvents),
+      subscribeAllWalletLedgerAdmin(setAdminWalletLedger),
+      subscribeAllCorrectionsAdmin(setAdminCorrections),
+      subscribeAllAnnouncementsAdmin(setAdminAnnouncements),
+    ];
     return () => {
-      unsubSettings();
-      unsubLogs();
+      unsubs.forEach((fn) => fn());
     };
   }, [authReady, firebaseUser?.uid, isSuperAdmin]);
 
@@ -475,7 +886,7 @@ function AppRouter() {
       <div className="min-h-screen flex flex-col">
         <Navbar currentRoute={route} onNavigate={navigate} />
         <EmailVerificationGate onSignOut={handleSignOut} />
-        <Footer onNavigate={navigate} />
+        <Footer onNavigate={navigate} onOpenPolicy={(slug) => openPublicPolicy(slug)} />
       </div>
     );
   }
@@ -484,8 +895,8 @@ function AppRouter() {
     return (
       <div className="min-h-screen flex flex-col">
         <Navbar currentRoute={route} onNavigate={navigate} />
-        <RoleOnboardingGate />
-        <Footer onNavigate={navigate} />
+        <RoleOnboardingGate policies={mergedCatalog.policies} />
+        <Footer onNavigate={navigate} onOpenPolicy={(slug) => openPublicPolicy(slug)} />
       </div>
     );
   }
@@ -513,6 +924,11 @@ function AppRouter() {
           wallet={wallet}
           transactions={transactions}
           withdrawals={withdrawals}
+          payoutAccounts={payoutAccounts}
+          financialConfig={financialConfig}
+          allWithdrawals={allWithdrawals}
+          allTransactions={allTransactions}
+          auditLogs={auditLogs}
           conversations={conversations}
           activeConversationId={activeConversationId}
           onSelectConversation={setActiveConversationId}
@@ -520,6 +936,32 @@ function AppRouter() {
           supportTickets={supportTickets}
           emailSettings={emailSettings}
           emailLogs={emailLogs}
+          policyCategories={mergedCatalog.categories}
+          policies={mergedCatalog.policies}
+          policyRevisions={mergedRevisions}
+          policyManifest={policyManifest}
+          userAcceptances={userAcceptances}
+          allPolicyAcceptances={allPolicyAcceptances}
+          registeredUsers={registeredUsers}
+          taskCategories={taskCategories}
+          userSubmissions={userSubmissions}
+          userReservations={userReservations}
+          userWalletLedger={userWalletLedger}
+          announcements={announcements}
+          autoApprovalSettings={autoApprovalSettings}
+          adminTasks={adminTasks}
+          adminTaskCategories={adminTaskCategories}
+          adminSubmissions={adminSubmissions}
+          adminApprovalTimers={adminApprovalTimers}
+          adminTaskSources={adminTaskSources}
+          adminSourceImports={adminSourceImports}
+          accountApplications={accountApplications}
+          operationalAuditLogs={operationalAuditLogs}
+          securityEvents={securityEvents}
+          adminWalletLedger={adminWalletLedger}
+          adminCorrections={adminCorrections}
+          adminAnnouncements={adminAnnouncements}
+          onOpenPublicPolicy={openPublicPolicy}
           onNavigate={navigate}
           onSelectTask={setSelectedTask}
           onOpenChat={handleOpenChat}
@@ -534,6 +976,7 @@ function AppRouter() {
           onClose={() => setSelectedTask(null)}
           onNavigate={navigate}
           onOpenChat={handleOpenChat}
+          onOpenPublicPolicy={openPublicPolicy}
         />
       </>
     );
@@ -552,12 +995,18 @@ function AppRouter() {
           route={publicRoute}
           tasks={publicTasks}
           tasksLoading={tasksLoading}
+          policyCategories={mergedCatalog.categories}
+          policies={mergedCatalog.policies}
+          policyRevisions={mergedRevisions}
+          userAcceptances={userAcceptances}
+          activePolicySlug={activePolicySlug}
+          onOpenPolicy={openPublicPolicy}
           onNavigate={navigate}
           onSelectTask={setSelectedTask}
         />
       </main>
 
-      <Footer onNavigate={navigate} />
+      <Footer onNavigate={navigate} onOpenPolicy={(slug) => openPublicPolicy(slug)} />
 
       <TaskDetailModal
         key={activeTask?.id || 'none'}
@@ -567,6 +1016,7 @@ function AppRouter() {
         onClose={() => setSelectedTask(null)}
         onNavigate={navigate}
         onOpenChat={handleOpenChat}
+        onOpenPublicPolicy={openPublicPolicy}
       />
     </div>
   );

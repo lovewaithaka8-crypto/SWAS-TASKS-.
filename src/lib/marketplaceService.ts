@@ -17,8 +17,10 @@ import {
 import type { User } from 'firebase/auth';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { dispatchPlatformEmail } from './emailService';
+import { SUPER_ADMIN_EMAIL } from './emailConfig';
 import {
   cleanText,
+  normalizeUsername,
   SCHEMA_LIMITS,
   validateBidInput,
   validateDisplayName,
@@ -26,8 +28,10 @@ import {
   validateSubmissionInput,
   validateSupportInput,
   validateTaskInput,
+  validateUsername,
 } from './validation';
 import type {
+  AccountStatus,
   AppNotification,
   ChatMessage,
   Conversation,
@@ -71,7 +75,13 @@ export async function createUserAccountDocs(
   user: User,
   role: UserRole,
   displayNameInput?: string,
-  businessNameInput?: string
+  businessNameInput?: string,
+  operational?: {
+    username?: string;
+    phone?: string;
+    country?: string;
+    accountStatus?: AccountStatus;
+  }
 ): Promise<void> {
   if (!validateRole(role)) throw new Error('Select either Worker or Client role.');
   const rawName =
@@ -83,6 +93,25 @@ export async function createUserAccountDocs(
     throw new Error('A verified email address from your account provider is required.');
   }
 
+  let cleanUsername: string | undefined;
+  if (operational?.username?.trim()) {
+    const uErr = validateUsername(operational.username);
+    if (uErr) throw new Error(uErr);
+    cleanUsername = normalizeUsername(operational.username);
+  }
+
+  const cleanPhone = operational?.phone?.trim()
+    ? cleanText(operational.phone, SCHEMA_LIMITS.phoneMax)
+    : undefined;
+  const cleanCountry = operational?.country?.trim()
+    ? cleanText(operational.country.toUpperCase(), 12)
+    : 'KE';
+  const isDefaultSuperAdmin = email.trim().toLowerCase() === SUPER_ADMIN_EMAIL && user.emailVerified;
+  const targetStatus: AccountStatus = isDefaultSuperAdmin
+    ? 'ACTIVE'
+    : operational?.accountStatus ||
+      (user.emailVerified ? 'PENDING_ADMIN_APPROVAL' : 'EMAIL_VERIFICATION_PENDING');
+
   const userRef = doc(db, 'users', user.uid);
   const pubRef = doc(db, 'publicProfiles', user.uid);
   const walletRef = doc(db, 'wallets', user.uid);
@@ -91,12 +120,29 @@ export async function createUserAccountDocs(
     const existing = await getDoc(userRef);
     if (existing.exists()) return;
 
+    if (cleanUsername) {
+      const unameSnap = await getDoc(doc(db, 'usernames', cleanUsername));
+      if (unameSnap.exists() && unameSnap.data()?.uid !== user.uid) {
+        throw new Error(`Username "@${cleanUsername}" is already taken.`);
+      }
+    }
+
     const batch = writeBatch(db);
     const userPayload: Record<string, unknown> = {
       uid: user.uid,
       email,
       displayName,
       role,
+      accountStatus: targetStatus,
+      statusReason:
+        targetStatus === 'ACTIVE'
+          ? 'Verified Super Administrator'
+          : targetStatus === 'PENDING_ADMIN_APPROVAL'
+          ? 'Email verified; awaiting administrator approval.'
+          : 'Email verification pending.',
+      emailVerified: Boolean(user.emailVerified),
+      country: cleanCountry,
+      preferredCurrency: cleanCountry === 'KE' ? 'KES' : 'USD',
       notifyBids: true,
       notifyMessages: true,
       notifyPayments: true,
@@ -111,6 +157,19 @@ export async function createUserAccountDocs(
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
+
+    if (cleanUsername) {
+      userPayload.username = cleanUsername;
+      pubPayload.username = cleanUsername;
+      batch.set(doc(db, 'usernames', cleanUsername), {
+        uid: user.uid,
+        username: cleanUsername,
+        createdAt: serverTimestamp(),
+      });
+    }
+    if (cleanPhone) {
+      userPayload.phone = cleanPhone;
+    }
 
     if (user.photoURL) {
       const safePhoto = cleanText(user.photoURL, 500);
@@ -130,11 +189,19 @@ export async function createUserAccountDocs(
       userId: user.uid,
       currency: 'KES',
       availableKes: 0,
+      availableBalance: 0,
+      pendingEarnings: 0,
+      totalEarned: 0,
+      totalWithdrawn: 0,
+      reservedWithdrawalFunds: 0,
       updatedAt: serverTimestamp(),
     });
 
     await batch.commit();
   } catch (error) {
+    if (error instanceof Error && error.message.includes('already taken')) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
   }
 }

@@ -18,6 +18,14 @@
    - Immutable append-only deposit/withdrawal records owned by `userId == request.auth.uid` with `amountKsh >= 50` and `status == 'recorded'`.
 5. **Temporal Integrity**:
    - All `createdAt` on create and `updatedAt` on update must equal `request.time`.
+6. **Account Lifecycle & Activation Gate (`users/{userId}`, `usernames/{username}`, `accountApplications/{id}`)**:
+   - Newly registered non-admin accounts start in `EMAIL_VERIFICATION_PENDING` or `PENDING_ADMIN_APPROVAL` and cannot self-promote `accountStatus` to `ACTIVE`. Only backend Admin SDK or verified `isAdmin()` transitions `accountStatus`.
+   - `ACTIVE` status is enforced on task claiming, work submission, and withdrawal creation.
+7. **Server-Authoritative 90-Minute Review Engine & Immutable Financial Ledger (`taskSubmissions`, `taskApprovalTimers`, `walletLedger`, `earnings`)**:
+   - Clients cannot write directly to `walletLedger`, `earnings`, `taskApprovalTimers`, `taskReviews`, `taskVersions`, `taskSourceImports`, `auditLogs`, or `securityEvents`.
+   - Wallet balance mutations (`availableKes`, `availableBalance`, `pendingEarnings`, `reservedWithdrawalFunds`, `totalEarned`, `totalWithdrawn`) execute strictly inside atomic backend Admin SDK transactions with idempotency keys (`auto_${submissionId}`, `admin_${submissionId}`, `wd_${withdrawalId}`).
+8. **Withdrawal Fund Reservation & Release (`withdrawals/{withdrawalId}`)**:
+   - Withdrawals are created atomically via `/api/withdrawals/request`, reserving `availableBalance` into `reservedWithdrawalFunds` with initial status `PENDING_ADMIN_APPROVAL`. No withdrawal is auto-paid; rejecting or cancelling releases reserved funds back atomically.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
 

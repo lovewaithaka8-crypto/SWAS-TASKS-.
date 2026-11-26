@@ -44,6 +44,7 @@ interface ClientPagesProps {
   transactions: LedgerTransaction[];
   onNavigate: (route: WorkspaceRoute) => void;
   onOpenChat: (conversationId: string) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }
 
 export function ClientPages({
@@ -55,6 +56,7 @@ export function ClientPages({
   transactions,
   onNavigate,
   onOpenChat,
+  onOpenPublicPolicy,
 }: ClientPagesProps) {
   if (route === 'dashboard') {
     return (
@@ -64,11 +66,12 @@ export function ClientPages({
         clientAssignments={clientAssignments}
         transactions={transactions}
         onNavigate={onNavigate}
+        onOpenPublicPolicy={onOpenPublicPolicy}
       />
     );
   }
   if (route === 'post-task') {
-    return <PostTaskView onNavigate={onNavigate} />;
+    return <PostTaskView onNavigate={onNavigate} onOpenPublicPolicy={onOpenPublicPolicy} />;
   }
   if (route === 'manage-tasks') {
     return (
@@ -97,6 +100,7 @@ export function ClientPages({
         clientAssignments={clientAssignments}
         onNavigate={onNavigate}
         onOpenChat={onOpenChat}
+        onOpenPublicPolicy={onOpenPublicPolicy}
       />
     );
   }
@@ -118,12 +122,14 @@ function ClientOverview({
   clientAssignments,
   transactions,
   onNavigate,
+  onOpenPublicPolicy,
 }: {
   clientTasks: MarketplaceTask[];
   clientBids: TaskBid[];
   clientAssignments: TaskAssignment[];
   transactions: LedgerTransaction[];
   onNavigate: (route: WorkspaceRoute) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }) {
   const { userPrivate } = useAuth();
   const activeProjects = useMemo(
@@ -216,6 +222,26 @@ function ClientOverview({
           <p className="swas-body mt-1">
             Publish structured task briefs, review worker proposals, and oversee project deliverables.
           </p>
+          {onOpenPublicPolicy && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[#5b6d85]">
+              <span>Governance:</span>
+              <button
+                type="button"
+                onClick={() => onOpenPublicPolicy('platform-rules')}
+                className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+              >
+                Platform Rules
+              </button>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                onClick={() => onOpenPublicPolicy('refund')}
+                className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+              >
+                Refund Policy
+              </button>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2.5 shrink-0">
           <button
@@ -342,7 +368,13 @@ function ClientOverview({
   );
 }
 
-function PostTaskView({ onNavigate }: { onNavigate: (route: WorkspaceRoute) => void }) {
+function PostTaskView({
+  onNavigate,
+  onOpenPublicPolicy,
+}: {
+  onNavigate: (route: WorkspaceRoute) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
+}) {
   const { firebaseUser, userPrivate } = useAuth();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<TaskCategory>(TASK_CATEGORIES[0]);
@@ -556,6 +588,28 @@ function PostTaskView({ onNavigate }: { onNavigate: (route: WorkspaceRoute) => v
               </select>
             </div>
           </div>
+
+          {onOpenPublicPolicy && (
+            <p className="text-[12px] text-[#5b6d85]">
+              Published briefs must comply with the{' '}
+              <button
+                type="button"
+                onClick={() => onOpenPublicPolicy('task-assignment')}
+                className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+              >
+                Task Assignment Policy
+              </button>{' '}
+              and{' '}
+              <button
+                type="button"
+                onClick={() => onOpenPublicPolicy('acceptable-use')}
+                className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+              >
+                Acceptable Use Policy
+              </button>
+              .
+            </p>
+          )}
 
           <div className="pt-2 flex items-center gap-3">
             <button
@@ -1099,10 +1153,12 @@ function ActiveProjectsView({
   clientAssignments,
   onNavigate,
   onOpenChat,
+  onOpenPublicPolicy,
 }: {
   clientAssignments: TaskAssignment[];
   onNavigate: (route: WorkspaceRoute) => void;
   onOpenChat: (conversationId: string) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }) {
   const { firebaseUser, userPrivate } = useAuth();
   const active = useMemo(
@@ -1272,6 +1328,27 @@ function ActiveProjectsView({
                 </>
               )}
             </div>
+
+            {onOpenPublicPolicy && (
+              <p className="text-[12px] text-[#5b6d85]">
+                Review guidelines:{' '}
+                <button
+                  type="button"
+                  onClick={() => onOpenPublicPolicy('task-revision')}
+                  className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+                >
+                  Task Revision Policy
+                </button>{' '}
+                ·{' '}
+                <button
+                  type="button"
+                  onClick={() => onOpenPublicPolicy('refund')}
+                  className="text-[#1265c8] hover:underline font-medium cursor-pointer"
+                >
+                  Refund Policy
+                </button>
+              </p>
+            )}
 
             {revisionId === asn.id && (
               <form

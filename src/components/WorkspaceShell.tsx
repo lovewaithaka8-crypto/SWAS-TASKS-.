@@ -2,54 +2,94 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowDownToLine,
   Bell,
+  BookOpen,
   Bookmark,
   Briefcase,
+  Building2,
   CheckCircle2,
   ChevronDown,
   ClipboardCheck,
   CreditCard,
   FileCheck2,
+  FileText,
   FolderKanban,
   Gavel,
   HelpCircle,
   Home,
+  Landmark,
   LayoutDashboard,
+  Layers,
   ListChecks,
   LogOut,
+  Megaphone,
   Menu,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   PlusCircle,
   Receipt,
+  Scale,
   Search,
   Settings,
   Shield,
   ShieldAlert,
   SlidersHorizontal,
+  Timer,
   User,
   Wallet,
   X,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { getPolicyAcceptanceState } from '../lib/policyService';
 import type {
+  AccountApplicationRecord,
+  AdminAutoApprovalSettings,
+  Announcement,
   AppNotification,
   CentralEmailSettings,
   Conversation,
   EmailDeliveryLog,
+  FinancialAuditLog,
+  FinancialPlatformConfig,
   LedgerTransaction,
   MarketplaceTask,
+  OperationalAuditLog,
+  PayoutAccount,
+  PolicyAcceptanceRecord,
+  PolicyCategory,
+  PolicyDocument,
+  PolicyRegistryManifest,
+  PolicyRevision,
   SavedTaskItem,
+  SecurityEvent,
   SupportTicket,
+  TaskApprovalTimer,
   TaskAssignment,
   TaskBid,
+  TaskCategoryConfig,
+  TaskCorrection,
+  TaskReservation,
+  TaskSourceConfig,
+  TaskSourceImport,
+  TaskSubmission,
+  UserPrivate,
   WalletAccount,
+  WalletLedgerEntry,
   WithdrawalRequest,
   WorkspaceRoute,
 } from '../types/marketplace';
+import { AdminFinancialControlPages } from './AdminFinancialControlPages';
+import { AdminOperationsPages } from './AdminOperationsPages';
+import { AdminPolicyControlPages } from './AdminPolicyControlPages';
 import { ClientPages } from './ClientPages';
 import { ControlCentrePages } from './ControlCentrePages';
+import {
+  AccountStatusBanner,
+  AnnouncementsView,
+  OperationalTasksView,
+} from './OperationalTasksPages';
+import { WorkspacePoliciesPage } from './PolicyCentrePages';
 import { SharedWorkspacePages } from './SharedWorkspacePages';
 import { WorkerPages } from './WorkerPages';
 
@@ -77,6 +117,11 @@ interface WorkspaceShellProps {
   wallet: WalletAccount | null;
   transactions: LedgerTransaction[];
   withdrawals: WithdrawalRequest[];
+  payoutAccounts: PayoutAccount[];
+  financialConfig: FinancialPlatformConfig;
+  allWithdrawals: WithdrawalRequest[];
+  allTransactions: LedgerTransaction[];
+  auditLogs: FinancialAuditLog[];
   conversations: Conversation[];
   activeConversationId: string | null;
   onSelectConversation: (id: string | null) => void;
@@ -84,6 +129,32 @@ interface WorkspaceShellProps {
   supportTickets: SupportTicket[];
   emailSettings: CentralEmailSettings;
   emailLogs: EmailDeliveryLog[];
+  policyCategories: PolicyCategory[];
+  policies: PolicyDocument[];
+  policyRevisions: PolicyRevision[];
+  policyManifest: PolicyRegistryManifest | null;
+  userAcceptances: PolicyAcceptanceRecord[];
+  allPolicyAcceptances: PolicyAcceptanceRecord[];
+  registeredUsers: UserPrivate[];
+  taskCategories: TaskCategoryConfig[];
+  userSubmissions: TaskSubmission[];
+  userReservations: TaskReservation[];
+  userWalletLedger: WalletLedgerEntry[];
+  announcements: Announcement[];
+  autoApprovalSettings: AdminAutoApprovalSettings;
+  adminTasks: MarketplaceTask[];
+  adminTaskCategories: TaskCategoryConfig[];
+  adminSubmissions: TaskSubmission[];
+  adminApprovalTimers: TaskApprovalTimer[];
+  adminTaskSources: TaskSourceConfig[];
+  adminSourceImports: TaskSourceImport[];
+  accountApplications: AccountApplicationRecord[];
+  operationalAuditLogs: OperationalAuditLog[];
+  securityEvents: SecurityEvent[];
+  adminWalletLedger: WalletLedgerEntry[];
+  adminCorrections: TaskCorrection[];
+  adminAnnouncements: Announcement[];
+  onOpenPublicPolicy: (slug?: string | null) => void;
   onNavigate: (route: WorkspaceRoute) => void;
   onSelectTask: (task: MarketplaceTask) => void;
   onOpenChat: (conversationId: string) => void;
@@ -94,6 +165,7 @@ interface WorkspaceShellProps {
 const ROUTE_META: Record<WorkspaceRoute, { title: string; section: string }> = {
   dashboard: { title: 'Dashboard', section: 'Dashboard' },
   'browse-tasks': { title: 'Browse Tasks', section: 'Workspace' },
+  'operational-tasks': { title: 'Operational Task Centre', section: 'Workspace' },
   'my-bids': { title: 'My Bids', section: 'Workspace' },
   'my-assignments': { title: 'My Assignments', section: 'Workspace' },
   'completed-work': { title: 'Completed Work', section: 'Workspace' },
@@ -103,17 +175,24 @@ const ROUTE_META: Record<WorkspaceRoute, { title: string; section: string }> = {
   'received-bids': { title: 'Received Bids', section: 'Workspace' },
   'active-projects': { title: 'Active Projects', section: 'Workspace' },
   'completed-projects': { title: 'Completed Projects', section: 'Workspace' },
-  wallet: { title: 'My Wallet', section: 'Finance' },
+  wallet: { title: 'Financial Centre', section: 'Finance' },
+  'payout-accounts': { title: 'Payout Accounts', section: 'Finance' },
   transactions: { title: 'Transactions', section: 'Finance' },
   withdrawals: { title: 'Withdrawal Requests', section: 'Finance' },
   'payment-history': { title: 'Payment History', section: 'Finance' },
   messages: { title: 'Messages', section: 'Communication' },
   notifications: { title: 'Notifications', section: 'Communication' },
+  announcements: { title: 'Announcements', section: 'Communication' },
   support: { title: 'Help & Support', section: 'Communication' },
   profile: { title: 'My Profile', section: 'Account' },
   settings: { title: 'Account Settings', section: 'Account' },
   security: { title: 'Security Settings', section: 'Account' },
+  'my-policies': { title: 'My Accepted Policies', section: 'Account & Governance' },
+  'policy-updates': { title: 'Policy Updates', section: 'Account & Governance' },
   'control-centre': { title: 'Central Control Centre', section: 'Control Centre' },
+  'admin-operations': { title: 'Operations & 90-Min Review', section: 'Control Centre' },
+  'financial-control': { title: 'Financial Control & Payouts', section: 'Control Centre' },
+  'policy-control': { title: 'Policy Control Centre', section: 'Control Centre' },
   'platform-settings': { title: 'Platform Email Settings', section: 'Control Centre' },
 };
 
@@ -129,6 +208,11 @@ export function WorkspaceShell({
   wallet,
   transactions,
   withdrawals,
+  payoutAccounts,
+  financialConfig,
+  allWithdrawals,
+  allTransactions,
+  auditLogs,
   conversations,
   activeConversationId,
   onSelectConversation,
@@ -136,6 +220,32 @@ export function WorkspaceShell({
   supportTickets,
   emailSettings,
   emailLogs,
+  policyCategories,
+  policies,
+  policyRevisions,
+  policyManifest,
+  userAcceptances,
+  allPolicyAcceptances,
+  registeredUsers,
+  taskCategories,
+  userSubmissions,
+  userReservations,
+  userWalletLedger,
+  announcements,
+  autoApprovalSettings,
+  adminTasks,
+  adminTaskCategories,
+  adminSubmissions,
+  adminApprovalTimers,
+  adminTaskSources,
+  adminSourceImports,
+  accountApplications,
+  operationalAuditLogs,
+  securityEvents,
+  adminWalletLedger,
+  adminCorrections,
+  adminAnnouncements,
+  onOpenPublicPolicy,
   onNavigate,
   onSelectTask,
   onOpenChat,
@@ -160,9 +270,17 @@ export function WorkspaceShell({
     return conversations.filter((c) => c.unreadBy.includes(firebaseUser.uid)).length;
   }, [conversations, firebaseUser]);
 
+  const pendingPolicyCount = useMemo(() => {
+    return policies.filter((p) => {
+      const state = getPolicyAcceptanceState(p, userAcceptances);
+      return state.needsRenewal || state.needsInitialAcceptance;
+    }).length;
+  }, [policies, userAcceptances]);
+
   const navGroups: NavGroup[] = useMemo(() => {
     const workspaceItems: NavEntry[] = isWorker
       ? [
+          { route: 'operational-tasks', label: 'Task Centre', icon: Layers },
           { route: 'browse-tasks', label: 'Browse Tasks', icon: Briefcase },
           { route: 'my-bids', label: 'My Bids', icon: Gavel },
           { route: 'my-assignments', label: 'My Assignments', icon: ClipboardCheck },
@@ -189,9 +307,10 @@ export function WorkspaceShell({
       {
         heading: 'FINANCE',
         items: [
-          { route: 'wallet', label: 'My Wallet', icon: Wallet },
-          { route: 'transactions', label: 'Transactions', icon: Receipt },
+          { route: 'wallet', label: 'Financial Centre', icon: Wallet },
+          { route: 'payout-accounts', label: 'Payout Accounts', icon: Building2 },
           { route: 'withdrawals', label: 'Withdrawal Requests', icon: ArrowDownToLine },
+          { route: 'transactions', label: 'Transactions', icon: Receipt },
           { route: 'payment-history', label: 'Payment History', icon: CreditCard },
         ],
       },
@@ -210,15 +329,27 @@ export function WorkspaceShell({
             icon: Bell,
             badgeCount: unreadNotifCount,
           },
+          {
+            route: 'announcements',
+            label: 'Announcements',
+            icon: Megaphone,
+          },
           { route: 'support', label: 'Help & Support', icon: HelpCircle },
         ],
       },
       {
-        heading: 'ACCOUNT',
+        heading: 'ACCOUNT & POLICIES',
         items: [
           { route: 'profile', label: 'My Profile', icon: User },
           { route: 'settings', label: 'Account Settings', icon: Settings },
           { route: 'security', label: 'Security Settings', icon: Shield },
+          {
+            route: 'my-policies',
+            label: 'My Accepted Policies',
+            icon: FileText,
+            badgeCount: pendingPolicyCount,
+          },
+          { route: 'policy-updates', label: 'Policy Updates', icon: BookOpen },
         ],
       },
     ];
@@ -228,13 +359,16 @@ export function WorkspaceShell({
         heading: 'CENTRAL CONTROL CENTRE',
         items: [
           { route: 'control-centre', label: 'Control Centre', icon: ShieldAlert },
+          { route: 'admin-operations', label: 'Operations & Review', icon: Timer },
+          { route: 'financial-control', label: 'Financial Control', icon: Landmark },
+          { route: 'policy-control', label: 'Policy Control', icon: Scale },
           { route: 'platform-settings', label: 'Platform Email Settings', icon: SlidersHorizontal },
         ],
       });
     }
 
     return groups;
-  }, [isWorker, isSuperAdmin, unreadMsgCount, unreadNotifCount]);
+  }, [isWorker, isSuperAdmin, unreadMsgCount, unreadNotifCount, pendingPolicyCount]);
 
   const mobileTabs: NavEntry[] = useMemo(
     () =>
@@ -278,8 +412,13 @@ export function WorkspaceShell({
   const isControlCentreRoute =
     route === 'control-centre' || route === 'platform-settings';
 
+  const isFinancialControlRoute = route === 'financial-control';
+  const isPolicyControlRoute = route === 'policy-control';
+  const isWorkspacePolicyRoute = route === 'my-policies' || route === 'policy-updates';
+
   const isSharedRoute =
     route === 'wallet' ||
+    route === 'payout-accounts' ||
     route === 'transactions' ||
     route === 'withdrawals' ||
     route === 'payment-history' ||
@@ -376,7 +515,23 @@ export function WorkspaceShell({
             </div>
           ))}
 
-          <div className="pt-2 border-t border-white/10">
+          <div className="pt-2 border-t border-white/10 space-y-1">
+            <button
+              type="button"
+              title={collapsed ? 'Policy Centre' : undefined}
+              onClick={() => onOpenPublicPolicy(null)}
+              className={`group relative w-full flex items-center rounded-[10px] text-[13px] lg:text-[14px] font-medium text-[#dce7f5] hover:bg-white/10 hover:text-white transition-colors cursor-pointer ${
+                collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
+              }`}
+            >
+              <Scale className="w-[19px] h-[19px] text-[#d5e4f5] group-hover:text-white shrink-0" />
+              {!collapsed && <span>Policy Centre ({policies.length})</span>}
+              {collapsed && (
+                <span className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity absolute left-full ml-3 px-2.5 py-1.5 rounded-md bg-[#102b50] border border-white/15 text-[12px] font-medium text-white whitespace-nowrap shadow-lg z-50">
+                  Policy Centre
+                </span>
+              )}
+            </button>
             <button
               type="button"
               title={collapsed ? 'Sign Out' : undefined}
@@ -547,13 +702,91 @@ export function WorkspaceShell({
         </header>
 
         {/* Workspace Viewport with safe bottom clearance for mobile floating dock */}
-        <main className="flex-1 p-4 md:p-6 lg:p-8 pb-28 lg:pb-10 max-w-[1400px] w-full mx-auto">
-          {isControlCentreRoute ? (
+        <main className="flex-1 p-4 md:p-6 lg:p-8 pb-28 lg:pb-10 max-w-[1400px] w-full mx-auto space-y-5">
+          {userPrivate && (
+            <AccountStatusBanner userPrivate={userPrivate} isSuperAdmin={isSuperAdmin} />
+          )}
+
+          {pendingPolicyCount > 0 && route !== 'my-policies' && (
+            <div className="rounded-[12px] bg-[#fffaf0] border border-[#eed497] px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-[13px] text-[#5c430d]">
+                <strong className="font-semibold text-[#8a5d00]">
+                  {pendingPolicyCount} required or updated {pendingPolicyCount === 1 ? 'policy awaits' : 'policies await'} your acceptance.
+                </strong>{' '}
+                Review the changes and record your consent in My Accepted Policies.
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('my-policies')}
+                className="px-3.5 py-1.5 rounded-[8px] bg-[#102b50] text-white text-[12px] font-semibold hover:bg-[#1265c8] cursor-pointer shrink-0"
+              >
+                Review & Accept
+              </button>
+            </div>
+          )}
+
+          {route === 'admin-operations' ? (
+            <AdminOperationsPages
+              registeredUsers={registeredUsers}
+              accountApplications={accountApplications}
+              allTasks={adminTasks.length > 0 ? adminTasks : publicTasks}
+              taskCategories={adminTaskCategories.length > 0 ? adminTaskCategories : taskCategories}
+              taskSources={adminTaskSources}
+              taskSourceImports={adminSourceImports}
+              submissions={adminSubmissions}
+              timers={adminApprovalTimers}
+              corrections={adminCorrections}
+              autoApprovalSettings={autoApprovalSettings}
+              allWithdrawals={allWithdrawals}
+              allWalletLedger={adminWalletLedger}
+              announcements={adminAnnouncements}
+              auditLogs={operationalAuditLogs}
+              securityEvents={securityEvents}
+            />
+          ) : route === 'operational-tasks' ? (
+            <OperationalTasksView
+              headerSearch={headerSearch}
+              publicTasks={publicTasks}
+              taskCategories={taskCategories}
+              userSubmissions={userSubmissions}
+              userReservations={userReservations}
+              wallet={wallet}
+              walletLedger={userWalletLedger}
+              onNavigate={onNavigate}
+            />
+          ) : route === 'announcements' ? (
+            <AnnouncementsView announcements={announcements} userRole={role} />
+          ) : isPolicyControlRoute ? (
+            <AdminPolicyControlPages
+              categories={policyCategories}
+              policies={policies}
+              revisions={policyRevisions}
+              manifest={policyManifest}
+              allAcceptances={allPolicyAcceptances}
+              registeredUsers={registeredUsers}
+            />
+          ) : isWorkspacePolicyRoute ? (
+            <WorkspacePoliciesPage
+              mode={route}
+              policies={policies}
+              revisions={policyRevisions}
+              userAcceptances={userAcceptances}
+              onOpenPublicPolicy={(slug) => onOpenPublicPolicy(slug || null)}
+            />
+          ) : isFinancialControlRoute ? (
+            <AdminFinancialControlPages
+              financialConfig={financialConfig}
+              allWithdrawals={allWithdrawals}
+              allTransactions={allTransactions}
+              auditLogs={auditLogs}
+            />
+          ) : isControlCentreRoute ? (
             <ControlCentrePages
               route={route}
               emailSettings={emailSettings}
               emailLogs={emailLogs}
               onNavigate={onNavigate}
+              onOpenPublicPolicy={(slug) => onOpenPublicPolicy(slug || null)}
             />
           ) : isSharedRoute ? (
             <SharedWorkspacePages
@@ -561,6 +794,11 @@ export function WorkspaceShell({
               wallet={wallet}
               transactions={transactions}
               withdrawals={withdrawals}
+              payoutAccounts={payoutAccounts}
+              financialConfig={financialConfig}
+              policies={policies}
+              userAcceptances={userAcceptances}
+              onOpenPublicPolicy={(slug) => onOpenPublicPolicy(slug || null)}
               conversations={conversations}
               activeConversationId={activeConversationId}
               onSelectConversation={onSelectConversation}
@@ -582,6 +820,7 @@ export function WorkspaceShell({
               onSelectTask={onSelectTask}
               onNavigate={onNavigate}
               onOpenChat={onOpenChat}
+              onOpenPublicPolicy={(slug) => onOpenPublicPolicy(slug || null)}
             />
           ) : (
             <ClientPages
@@ -593,6 +832,7 @@ export function WorkspaceShell({
               transactions={transactions}
               onNavigate={onNavigate}
               onOpenChat={onOpenChat}
+              onOpenPublicPolicy={(slug) => onOpenPublicPolicy(slug || null)}
             />
           )}
         </main>

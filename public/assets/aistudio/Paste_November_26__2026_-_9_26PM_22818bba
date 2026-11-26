@@ -1,0 +1,1212 @@
+I understand exactly what you want now. You want **SWAS TASKS to become a fully functioning online work platform**, not a website that only displays tasks. It should have its own database, registration, task management, review system, wallet, earnings, and withdrawals, all controlled by your administration.
+
+You also want the task system to have two sources:
+
+1. **Your own tasks** — you or your admin create, post, renew, upgrade, edit, and publish tasks at any time.
+2. **GWENO HUB sourced tasks** — tasks you obtain from GWENO and bring into SWAS TASKS for your users to complete, subject to your authorization to redistribute or repost them.
+
+The entire system should work like a real job/task marketplace.
+
+# **1. How SWAS TASKS should operate**
+
+## **SWAS TASKS — Complete Workflow**
+
+From registration to earning and withdrawal
+
+01 · Registration
+
+Client registers → verifies email → creates secure account → account enters Pending Approval.
+
+02 · Admin Activation
+
+Admin verifies the account → activates it → client gets access to their workplace.
+
+03 · Task Centre
+
+Client sees available jobs/tasks, reward amount, deadline, instructions and requirements.
+
+04 · Work
+
+Client accepts a task → task becomes reserved for that user → client completes and submits.
+
+05 · Review — 90 minutes
+
+Task enters Under Review → 90-minute countdown begins → admin can review early → if still awaiting review, system automatically approves after 90 minutes under your configured rule.
+
+06 · Earnings
+
+Approved task reward is credited exactly once to the user's available wallet balance.
+
+07 · Withdrawal Request
+
+Client requests withdrawal → money is reserved → withdrawal status is Pending Admin Approval.
+
+08 · Admin Payout
+
+Admin verifies details and approves → payout is processed → payment reference recorded → marked Paid only after payment confirmation.
+
+Important for the GWENO task source:
+
+GWENO tasks should not be scraped, copied, or automatically republished as if they belong to SWAS TASKS without permission. The system can have a **GWENO task source/import module** for tasks you are authorized to bring over, using an official API, permitted feed, authorized manual entry, or an approved import method. Tasks must retain their source attribution, original conditions and restrictions where applicable. If GWENO does not provide an authorized integration, you can still enter task details manually when you have permission to distribute them.
+
+# **2. The complete SWAS TASKS database & operations prompt**
+
+This prompt is for your **existing SWAS TASKS client website**. It instructs AI Studio to build the real backend and working system, rather than create a new demo website.
+
+# SWAS TASKS — BUILD A COMPLETE REAL ONLINE WORK PLATFORM, DATABASE, TASK MARKETPLACE, EARNINGS, AND WITHDRAWAL SYSTEM
+
+PROJECT:\
+Existing SWAS TASKS client platform:\
+[https://swas-tasks-org.vercel.app/](https://swas-tasks-org.vercel.app/)
+
+REFERENCE TASK PLATFORM:\
+[https://www.gweno.business/](https://www.gweno.business/)
+
+OBJECTIVE:
+
+Transform my existing SWAS TASKS website into a fully functional online task/work marketplace where users can register, have their accounts verified and activated by administrators, access real tasks, complete work, submit assignments, get reviewed, earn money, accumulate real wallet balances, and request withdrawals which remain pending until an administrator approves them.
+
+This must be a real operational system, similar to how legitimate online task marketplaces and working applications function.
+
+Do not only create UI screens. Implement the database, backend, authentication, authorization, transactions, workflows, task management, notifications, and administrative controls.
+
+\==================================================
+
+1. INSPECT THE EXISTING PROJECT FIRST\
+   \==================================================
+
+Before coding:
+
+- Inspect the entire existing SWAS TASKS source code.
+- Identify its current framework, routes, Firebase configuration, authentication, database, storage, UI components and deployment setup.
+- Identify what currently works.
+- Identify incomplete, broken or disconnected features.
+- Reuse the existing project.
+- Preserve its current branding and working features.
+- Do not create a separate disconnected application.
+- Do not replace existing working Firebase authentication with fake authentication.
+- Do not destroy existing database data.
+- Do not use mock data or simulated users.
+- Implement the required system directly into the current project.
+
+Use Firebase as the actual backend.
+
+Use:
+
+- Firebase Authentication
+- Cloud Firestore
+- Firebase Storage
+- Firebase Cloud Functions or secure server-side backend
+- Firebase Admin SDK for privileged operations
+- Firestore security rules
+- Storage security rules
+- Server-side transaction processing
+
+Create or integrate properly structured collections including:
+
+users\
+userProfiles\
+accountApplications\
+accountVerifications\
+accountActivation\
+userSettings\
+userSecurity\
+departments\
+workplaces\
+workplaceMembers\
+taskCategories\
+taskSources\
+taskSourceImports\
+tasks\
+taskVersions\
+taskAssignments\
+taskReservations\
+taskSubmissions\
+submissionAttachments\
+taskReviews\
+taskCorrections\
+taskApprovalTimers\
+earnings\
+wallets\
+walletLedger\
+withdrawalMethods\
+withdrawalRequests\
+payoutRecords\
+paymentRecords\
+notifications\
+announcements\
+supportTickets\
+policyDocuments\
+policyVersions\
+policyAcceptances\
+referrals\
+platformSettings\
+adminSettings\
+adminRoles\
+staffRoles\
+auditLogs\
+securityEvents\
+emailLogs
+
+Use correct document relationships, indexes, timestamps, ownership, and validation.
+
+Never create fictitious users, task completions, payments, earnings, wallet balances, withdrawals, reviews, or notifications.
+
+When the database is empty, display proper empty states.
+
+Make registration fully functional.
+
+Registration fields:
+
+- Full legal name
+- Username
+- Email address
+- Phone number
+- Country
+- Password
+- Confirm password
+- Terms and Conditions acceptance
+- Privacy Policy acceptance
+- User Conduct Policy acceptance
+
+Registration must:
+
+- Validate all fields.
+- Prevent duplicate usernames.
+- Handle duplicate emails.
+- Validate phone formats.
+- Securely store credentials through Firebase Authentication.
+- Never store plain text passwords.
+- Send real email verification.
+- Create the user's database profile.
+- Generate and assign a unique Firebase UID.
+- Save registration timestamps.
+- Save policy acceptance version records.
+- Create the initial account status.
+- Log registration events securely.
+
+Account statuses:
+
+REGISTERED\
+EMAIL_VERIFICATION_PENDING\
+PENDING_ADMIN_APPROVAL\
+ACTIVE\
+RESTRICTED\
+SUSPENDED\
+REJECTED\
+CLOSED
+
+New registrations must not immediately access earning or withdrawal features.
+
+The administrator must have a functional account review and approval screen.
+
+Admin can:
+
+- View applications.
+- Search users.
+- View registration details.
+- Verify accounts.
+- Approve.
+- Reject.
+- Request more information.
+- Restrict.
+- Suspend.
+- Reactivate where permitted.
+- Record reasons.
+- View application history.
+
+After approval, the user receives a real notification and email if the email provider is configured.
+
+Do not trust account statuses controlled by the client browser.
+
+Every registered user must have their own private workplace/dashboard.
+
+The workplace must display:
+
+- Welcome section
+- Account status
+- Available tasks
+- My active tasks
+- Submitted tasks
+- Tasks under review
+- Tasks requiring corrections
+- Approved tasks
+- Rejected tasks
+- Task history
+- Available balance
+- Pending earnings
+- Total approved earnings
+- Total withdrawals
+- Pending withdrawal requests
+- Notifications
+- Announcements
+- Payment methods
+- Account settings
+- Security settings
+- Help and support
+- Policies
+
+Every user must only see their own private information.
+
+Create real user-specific queries using their authenticated UID.
+
+Create a fully functional Task Centre.
+
+Tasks must be created and controlled by administrators.
+
+The administrator can create a task with:
+
+- Task title
+- Task ID
+- Task category
+- Task description
+- Full instructions
+- Required skills
+- Estimated completion time
+- Task reward amount
+- Currency
+- Number of available slots
+- Per-user limit
+- Task deadline
+- Task opening date
+- Task closing date
+- Eligibility rules
+- Country eligibility
+- Account eligibility
+- Workplace or department
+- Task priority
+- Required submission format
+- Attachments
+- Reference links
+- Submission requirements
+- Review requirements
+- Correction availability
+- Correction deadline
+- Source of task
+- Source reference
+- Task terms
+- Status
+
+Task status options:
+
+DRAFT\
+SCHEDULED\
+PUBLISHED\
+PAUSED\
+FULL\
+EXPIRED\
+CANCELLED\
+ARCHIVED
+
+Admin controls:
+
+- Create new task
+- Save draft
+- Preview
+- Publish immediately
+- Schedule publication
+- Edit published tasks
+- Renew tasks
+- Extend deadline
+- Upgrade task reward
+- Reduce or increase available slots
+- Pause
+- Resume
+- Close
+- Reopen
+- Archive
+- Duplicate task configuration
+- Create recurring task schedules
+- View participation
+- View completion statistics
+
+Every task update must be recorded in the task version history.
+
+When the administrator renews or upgrades a task, update the actual database record and task availability. Do not create duplicate task listings accidentally.
+
+Create a Task Source Management system.
+
+Task sources:
+
+A. SWAS TASKS ORIGINAL TASKS
+
+Tasks created directly by SWAS TASKS administrators.
+
+B. AUTHORIZED EXTERNAL TASK SOURCES
+
+A source integration/import system for external task providers, including GWENO HUB where reposting, redistribution, or participation arrangements have been expressly authorized.
+
+Reference:\
+[https://www.gweno.business/](https://www.gweno.business/)
+
+Create an External Task Source Management page in the admin panel.
+
+It must include:
+
+- Source name
+- Source website
+- Source type
+- Source task ID
+- Import method
+- Import date
+- Source task title
+- Original task instructions
+- Original reward
+- Source currency
+- Source eligibility
+- Source deadline
+- Attribution
+- Permission/authorization status
+- Redistribution rights status
+- Import status
+- SWAS TASKS task ID
+- Import administrator
+- Import audit history
+
+Import methods may include:
+
+- Authorized official API
+- Authorized data feed
+- Authorized provider integration
+- Permitted manual entry
+- Authorized document import
+
+Do not bypass login restrictions, scrape protected pages, bypass CAPTCHA, or automate unauthorized task claiming or submission.
+
+Do not copy GWENO tasks and present them as SWAS-owned tasks.
+
+Do not import or republish a task until the administrator has confirmed the appropriate permission to distribute it through SWAS TASKS.
+
+Preserve source-specific requirements, eligibility, limitations, and reward conditions.
+
+If an authorized GWENO task is imported:
+
+- Store the source reference.
+- Preserve the applicable original instructions.
+- Clearly indicate the source.
+- Display eligibility restrictions.
+- Show whether the task is external or SWAS-created.
+- Track source-specific completion conditions.
+- Track source reward and SWAS reward separately where relevant.
+- Do not promise payment from SWAS until the task is eligible for SWAS payment under its configured rules.
+- Prevent unauthorized duplicate participation where required by the source.
+
+If no official integration is available, build the source-management module so authorized tasks can be entered manually by the administrator.
+
+Do not claim a live GWENO integration exists until a real authorized integration has been configured and tested.
+
+When a client opens a task, they must see:
+
+- Task title
+- Full description
+- Instructions
+- Reward
+- Deadline
+- Eligibility
+- Required output
+- Submission method
+- Task source
+- Correction conditions
+- Terms
+
+Buttons:
+
+VIEW TASK\
+ACCEPT TASK\
+START TASK\
+SUBMIT TASK
+
+Task acceptance must be processed securely on the backend.
+
+When accepted:
+
+- Verify the user account is ACTIVE.
+- Verify the user is eligible.
+- Verify the task is PUBLISHED.
+- Verify the task has available slots.
+- Verify the task deadline has not passed.
+- Verify user task limits.
+- Verify that the user has not already completed or claimed the task where prohibited.
+- Reserve the task slot atomically.
+- Create the task assignment.
+- Record the acceptance time.
+- Set the task status for that user.
+- Display it under My Active Tasks.
+
+Prevent multiple users from claiming the final available slot simultaneously.
+
+Clients must have a real submission interface.
+
+Depending on the task type, allow:
+
+- Text entry
+- Document upload
+- PDF
+- DOC/DOCX
+- Approved image uploads
+- Supporting attachments
+- External link submission where permitted
+- Required form fields
+- Completion declaration
+
+Each submission must contain:
+
+- Submission ID
+- Task ID
+- Assignment ID
+- User UID
+- Submitted content
+- Attachments
+- Submission timestamp
+- Submission version
+- Status
+- Review history
+
+Submission statuses:
+
+DRAFT\
+SUBMITTED\
+UNDER_REVIEW\
+APPROVED\
+AUTO_APPROVED\
+CORRECTION_REQUIRED\
+RESUBMITTED\
+REJECTED\
+CANCELLED
+
+Once submitted, preserve the submission and its history.
+
+Prevent unauthorized editing of a submission that is already under review.
+
+THIS IS A CORE REQUIREMENT.
+
+When a client submits a task:
+
+1. Save the submission to Firestore.
+2. Set submission status to UNDER_REVIEW.
+3. Record the exact server timestamp of submission.
+4. Create a 90-minute review deadline.
+5. Calculate the review deadline on the server.
+6. Display a countdown in the user's workplace.
+7. Notify the administrator that the submission is waiting for review.
+8. Allow the admin to approve, reject, or return it for correction before the timer ends.
+
+Review duration:
+
+90 MINUTES FROM THE SERVER-RECORDED SUBMISSION TIME.
+
+Create a reliable scheduled backend process to monitor pending reviews.
+
+When the 90-minute review deadline has passed:
+
+- Check that the submission is still UNDER_REVIEW.
+- Check that the submission has not been rejected.
+- Check that it has not been returned for correction.
+- Check that no administrator has already reviewed it.
+- Check that it is eligible for automatic approval.
+- Automatically approve it if it meets the configured auto-approval requirements.
+- Set status to AUTO_APPROVED.
+- Record the automatic approval time.
+- Record the reason: REVIEW DEADLINE REACHED.
+- Create the earnings ledger transaction.
+- Credit the wallet exactly once.
+- Send a real notification.
+- Send an email if configured.
+- Write an audit record.
+
+IMPORTANT:
+
+The 90-minute auto-approval feature must be configurable in the Admin Settings.
+
+Admin must be able to:
+
+- Enable or disable automatic approval.
+- Set review duration.
+- Set task categories excluded from auto-approval.
+- Set tasks requiring manual review only.
+- Place a submission on hold before the timer expires.
+- Investigate suspicious submissions.
+- Approve early.
+- Reject.
+- Request corrections.
+
+Do not automatically approve tasks that are marked manual-review-only, have an active investigation hold, or are excluded by task rules.
+
+A task that has been returned for correction must not receive automatic approval from its original submission timer.
+
+A corrected submission must receive a new review cycle and its own server timestamp and configured review deadline.
+
+Use Cloud Functions, scheduled jobs, or an equivalent reliable backend mechanism. Do not use browser timers as the approval authority.
+
+Create a real Admin Review Centre.
+
+Tabs:
+
+- New Submissions
+- Under Review
+- Approaching 90-Minute Deadline
+- Auto-Approval Eligible
+- Correction Requests
+- Resubmissions
+- Approved
+- Rejected
+- Suspicious / On Hold
+- Review History
+
+Each submission must display:
+
+- User
+- User UID
+- Task title
+- Task source
+- Reward
+- Submission time
+- Time remaining
+- Deadline
+- Submission content
+- Attachments
+- Task requirements
+- Previous correction history
+- User task history where authorized
+
+Admin actions:
+
+APPROVE\
+REJECT\
+REQUEST CORRECTION\
+PLACE ON HOLD\
+REMOVE HOLD\
+ADD REVIEW NOTE
+
+Review notes and actions must be logged.
+
+Approval must trigger a backend earnings transaction, not a frontend balance change.
+
+If a task needs correction:
+
+- Admin selects Request Correction.
+- Admin writes specific correction instructions.
+- Admin optionally sets a correction deadline.
+- Submission status becomes CORRECTION_REQUIRED.
+- The user's earnings are not credited.
+- The task appears in the Corrections section.
+- The user receives a notification and email if configured.
+- The original submission remains stored.
+- The user can resubmit corrected work.
+- The corrected version receives a new submission version.
+- The corrected work enters a fresh review cycle.
+- A new 90-minute review timer starts if automatic review is enabled.
+
+Admin must be able to see every previous submission and correction.
+
+Create a secure wallet for every user.
+
+Wallet information:
+
+- UID
+- Currency
+- Available balance
+- Pending earnings
+- Total earned
+- Total withdrawn
+- Reserved withdrawal funds
+- Last updated
+
+The balance must never be manually modified from the client browser.
+
+Use a financial ledger.
+
+Every transaction must have:
+
+- Transaction ID
+- UID
+- Transaction type
+- Task ID if applicable
+- Submission ID if applicable
+- Withdrawal ID if applicable
+- Amount
+- Currency
+- Status
+- Description
+- Reference
+- Created timestamp
+- Processed timestamp
+- Reversal reference where applicable
+- Idempotency key
+
+Transaction types:
+
+TASK_EARNING\
+PENDING_EARNING\
+EARNING_APPROVAL\
+WITHDRAWAL_REQUEST\
+WITHDRAWAL_RESERVATION\
+WITHDRAWAL_APPROVAL\
+WITHDRAWAL_PAID\
+WITHDRAWAL_REJECTION\
+WITHDRAWAL_RELEASE\
+FEE\
+REFUND\
+REVERSAL\
+ADMIN_ADJUSTMENT
+
+When a task is approved:
+
+- Read the task reward from the trusted database.
+- Verify that the reward has not already been credited.
+- Create an immutable ledger transaction.
+- Update the wallet using a secure Firestore transaction.
+- Credit the exact eligible reward.
+- Store currency.
+- Prevent duplicate crediting.
+- Record task and submission references.
+
+Do not credit a submission twice, even if a scheduled job runs more than once or the user refreshes their page.
+
+Pending earnings must be clearly distinguished from available earnings.
+
+Create a fully functional Withdrawals Centre.
+
+Client withdrawal page:
+
+- Available balance
+- Pending earnings
+- Reserved amount
+- Withdrawal minimum
+- Withdrawal maximum
+- Applicable fee
+- Net payment
+- Currency
+- Saved payment methods
+- Add payment method
+- Withdrawal amount
+- Confirm withdrawal
+- Withdrawal history
+
+Supported payment method types should be configurable:
+
+- Mobile Money
+- Bank Transfer
+- Digital Wallet
+- Supported online payment providers
+- Supported cryptocurrency payouts where enabled and compliant
+
+Only display payment methods supported for the user's country and currency.
+
+When a user requests withdrawal:
+
+1. Validate the authenticated UID.
+2. Confirm account status is ACTIVE.
+3. Confirm the withdrawal amount is positive.
+4. Confirm it meets configured limits.
+5. Confirm available balance is sufficient.
+6. Verify payment details.
+7. Calculate fees on the backend.
+8. Reserve the funds atomically.
+9. Create a withdrawal request.
+10. Record a ledger transaction.
+11. Set withdrawal status to PENDING_ADMIN_APPROVAL.
+12. Notify the admin.
+13. Notify the user that the request is pending approval.
+
+THE WITHDRAWAL MUST NOT BE PAID AUTOMATICALLY.
+
+Create a functional Admin Withdrawals dashboard.
+
+Sections:
+
+- Pending Approval
+- Approved for Payment
+- Processing
+- Paid
+- Rejected
+- On Hold
+- Withdrawal History
+
+Display:
+
+- User full name
+- UID
+- Username
+- Country
+- Withdrawal request ID
+- Amount
+- Currency
+- Fee
+- Net amount
+- Payment method
+- Masked account details
+- Request timestamp
+- User available balance before request
+- Verification status
+- User transaction history where authorized
+
+Admin actions:
+
+APPROVE\
+REJECT\
+PLACE ON HOLD\
+RELEASE HOLD\
+MARK PROCESSING\
+MARK PAID\
+ADD ADMIN NOTE
+
+When Admin approves:
+
+- Verify that the funds remain reserved.
+- Record the admin UID.
+- Record approval timestamp.
+- Move to APPROVED_FOR_PAYMENT.
+- Do not mark the withdrawal PAID merely because it has been approved.
+
+When the payment is actually sent:
+
+- Admin enters the actual payment reference or transaction ID.
+- Record payment evidence/reference.
+- Update status to PAID only after confirmation.
+- Complete the ledger settlement.
+- Record paid timestamp.
+- Notify the user.
+- Send email if configured.
+
+When Admin rejects:
+
+- Require a rejection reason.
+- Release reserved funds back to available balance through an atomic ledger transaction.
+- Mark withdrawal REJECTED.
+- Notify user.
+- Preserve the complete history.
+
+If Admin places a withdrawal on hold, keep funds reserved unless the authorized admin explicitly cancels the request and releases the reservation.
+
+Prevent duplicate withdrawal requests and double payouts.
+
+Allow users to save payment accounts.
+
+Each payment method should store:
+
+- UID
+- Provider name
+- Method type
+- Country
+- Currency
+- Account holder
+- Masked account identifier
+- Securely stored account details where needed
+- Verification status
+- Default method
+- Created timestamp
+
+Allow:
+
+- Add payment method
+- Edit
+- Verify
+- Set default
+- Remove unused method
+
+Sensitive details must be protected and never publicly readable.
+
+Create a real notification system.
+
+Notification events:
+
+- Registration successful
+- Email verification
+- Account pending approval
+- Account approved
+- Account rejected
+- Account restricted
+- Account activated
+- New task published
+- Task updated
+- Task closing soon
+- Task accepted
+- Submission received
+- Review started
+- Review deadline approaching
+- Task approved
+- Auto-approved after 90 minutes
+- Correction required
+- Task rejected
+- Earnings credited
+- Withdrawal requested
+- Withdrawal pending admin approval
+- Withdrawal approved
+- Withdrawal processing
+- Withdrawal paid
+- Withdrawal rejected
+- Account security alert
+- Policy updated
+- Support reply
+
+Notifications must be stored in Firestore and linked to their recipient UID.
+
+Make notifications:
+
+- Read
+- Unread
+- Mark read
+- Mark all read
+- Open related task or transaction
+
+Email sender configuration must use the authorized SWAS TASKS sender.
+
+Official email:\
+[sswastasksorg@gmail.com](mailto:sswastasksorg@gmail.com)
+
+Do not fake email sending.
+
+If the email provider is not configured, display a clear configuration error and preserve the notification in the database.
+
+Admin dashboard must contain:
+
+- Overview
+- Users
+- Registration Applications
+- Account Verification
+- Account Activation
+- Tasks
+- Task Categories
+- Task Sources
+- GWENO/External Source Management
+- Task Assignments
+- Submissions
+- Task Reviews
+- Corrections
+- Auto-Approval Settings
+- Wallets
+- Earnings
+- Financial Ledger
+- Withdrawals
+- Payment Methods
+- Payout Processing
+- Notifications
+- Announcements
+- Email Management
+- Support
+- Policies
+- Reports
+- Audit Logs
+- Platform Settings
+- Security Centre
+
+All admin functions must work with the real database.
+
+Do not create buttons that are decorative or do nothing.
+
+Allow administrators to create and manage many task categories, including:
+
+- Writing
+- Research
+- Email Responses
+- Data Entry
+- Surveys and Questionnaires
+- Information Analysis
+- Content Review
+- Transcription
+- Digital Assistance
+- Online Research
+- Document Preparation
+- Product Research
+- Classification
+- Evaluation
+- Translation where available
+- Other Digital Assignments
+
+These must be configurable categories, not hardcoded permanently.
+
+Admin can create, rename, reorder, activate, deactivate, and delete categories only where deleting them does not damage existing task records.
+
+Build a real rules and policies system.
+
+Users must follow:
+
+- Terms and Conditions
+- Privacy Policy
+- User Conduct Policy
+- Task Participation Rules
+- Task Quality Policy
+- Submission Rules
+- Correction Rules
+- Earnings Policy
+- Wallet Policy
+- Withdrawal Policy
+- Payment Verification Policy
+- Fraud Prevention Policy
+- Account Security Policy
+- Account Restriction and Suspension Policy
+- Appeal Policy
+- Workplace Rules
+- Confidentiality Policy
+
+Rules must be visible and accessible.
+
+Require acceptance where appropriate.
+
+Record:
+
+- UID
+- Policy ID
+- Version
+- Timestamp
+- Consent type
+
+Do not pre-check policy acceptance boxes.
+
+Build reports from real Firestore records.
+
+Task reports:
+
+- Tasks published
+- Tasks available
+- Tasks claimed
+- Tasks submitted
+- Tasks approved
+- Tasks automatically approved
+- Tasks rejected
+- Tasks corrected
+- Task source performance
+
+User reports:
+
+- Registered users
+- Pending approvals
+- Active users
+- Suspended users
+- Task participation
+- User earnings
+
+Financial reports:
+
+- Total earned
+- Pending earnings
+- Approved earnings
+- Available wallet balances
+- Reserved withdrawals
+- Withdrawals pending approval
+- Withdrawals approved
+- Withdrawals paid
+- Withdrawal rejection
+- Transaction ledger
+
+Allow filters:
+
+- Date range
+- User
+- Country
+- Task
+- Category
+- Status
+- Currency
+- Task source
+
+Allow exporting legitimate records to CSV where authorized.
+
+Security is a mandatory requirement.
+
+- Use Firebase Authentication.
+- Use server-side authorization.
+- Use Firebase Admin SDK only on secure server environments.
+- Validate every request.
+- Protect every collection.
+- Validate ownership.
+- Verify admin roles from trusted database records.
+- Never trust frontend admin flags.
+- Never allow users to change their own roles.
+- Never allow users to approve their own accounts.
+- Never allow users to approve their own task submissions.
+- Never allow users to credit their own wallets.
+- Never allow users to approve their own withdrawals.
+- Never expose payment credentials or secret keys.
+- Never store plain text passwords.
+- Prevent duplicate financial transactions.
+- Prevent race conditions.
+- Use atomic Firestore transactions.
+- Use idempotency keys.
+- Validate all amounts server-side.
+- Apply rate limits to registration, login, submissions, and withdrawals.
+- Keep audit records for sensitive admin operations.
+- Protect user documents and private task submissions.
+- Use secure file upload validation.
+- Protect Firebase Storage.
+- Prevent users from reading other users' financial records.
+- Implement a deny-by-default security rules structure.
+
+Create real backend jobs for:
+
+- Email verification workflows
+- Account activation workflows
+- Task publication scheduling
+- Task expiration
+- Reservation expiry
+- Submission review deadline monitoring
+- 90-minute auto-approval
+- Correction deadline monitoring
+- Wallet crediting
+- Withdrawal reservations
+- Notification generation
+- Payment status updates
+- Scheduled task renewal where configured
+- Audit logging
+
+Backend jobs must be reliable, retry safely, and be idempotent.
+
+Do not depend on the browser being open.
+
+Keep the existing SWAS TASKS branding.
+
+Make the interface premium and professional:
+
+- Modern dark glassmorphism
+- Refined gradients
+- Clean cards
+- Professional typography
+- Inter/Poppins where available
+- Clear readable contrast
+- Vertical navigation
+- Responsive desktop, tablet and mobile
+- Mobile-friendly task submissions
+- Premium workplace experience
+- Smooth but lightweight transitions
+- Clear status badges
+- Useful empty states
+- Real loading states
+- Real error messages
+- Confirmation dialogs for financial actions
+
+Avoid clutter, fake graphs, excessive charts, and decorative features that don't help users complete work.
+
+Make task browsing simple, task instructions easy to read, and the wallet and withdrawal screens clear.
+
+Test the actual implementation.
+
+Registration:
+
+- New user registers.
+- Email verification.
+- Duplicate email.
+- Duplicate username.
+- Invalid input.
+- Pending account.
+- Admin approval.
+- User access restrictions.
+
+Tasks:
+
+- Admin creates task.
+- Task publishes.
+- Client browses.
+- Client claims task.
+- Slot reservation.
+- Duplicate claim prevention.
+- Client submits.
+- Submission saved.
+
+Review:
+
+- Admin reviews.
+- Admin approves early.
+- Admin rejects.
+- Admin requests correction.
+- Corrected submission.
+- 90-minute auto-approval.
+- Manual-review exclusion.
+- Duplicate timer execution.
+- No duplicate earning credit.
+
+Wallet:
+
+- Reward credited after approval.
+- Correct currency.
+- Correct amount.
+- No double credit.
+- Ledger records correctly.
+
+Withdrawal:
+
+- Client requests withdrawal.
+- Funds reserve.
+- Admin sees pending request.
+- Admin approves.
+- Admin rejects.
+- Rejected funds released.
+- Admin marks processing.
+- Admin marks paid with actual reference.
+- Duplicate payout prevention.
+
+Security:
+
+- Client cannot edit wallet balance.
+- Client cannot approve task.
+- Client cannot approve withdrawal.
+- Client cannot read other users' records.
+- Client cannot become admin.
+- Unauthenticated access is blocked.
+
+Deliver a working SWAS TASKS online work platform.
+
+The website must be able to operate with real users and real data after Firebase, email, backend services, payment configurations, and necessary source-task permissions are configured.
+
+Do not stop at designing the UI.
+
+Implement the real system.
+
+Do not insert sample users or financial records to make the dashboard look populated.
+
+Do not fabricate payment confirmations.
+
+Do not fabricate task approvals.
+
+Do not pretend GWENO has been connected if no authorized connection exists.
+
+Do not make earning guarantees that the platform cannot support.
+
+When finished, give me a clear implementation report listing:
+
+1. What you implemented.
+2. Firebase collections created or updated.
+3. Backend functions created.
+4. Firestore and Storage security rules changed.
+5. Registration workflow completed.
+6. Task system completed.
+7. Review and 90-minute approval workflow completed.
+8. Earnings and wallet system completed.
+9. Admin withdrawal approval system completed.
+10. Email and notification configuration needed.
+11. GWENO task source integration status and permissions still needed.
+12. Any remaining steps I need to do in Firebase or deployment.
+
+Make sure the project builds successfully and is ready to deploy through the existing GitHub and Vercel workflow.
+
+## **3. How the money will flow**
+
+**Task reward**
+
+KSh 100
+
+Example only — not an actual task or payment
+
+**Task submitted**
+
+KSh 100 pending review
+
+**Approved after 90 minutes**
+
+Reward is credited to wallet once
+
+**Available balance**
+
+Client can request withdrawal
+
+# **KSh 100**
+
+**Withdrawal — Pending Admin Approval**
+
+Money is reserved. Admin checks, approves, processes the actual payment and records its reference. Rejected requests return the reserved amount to the available wallet.
+
+One important thing before launching real payments:
+
+The 90-minute automatic approval means SWAS TASKS becomes responsible for paying that reward even if an administrator has not checked it. You should only publish tasks with rewards that your platform can actually fund, and for tasks sourced from GWENO, confirm the task is authorized and the reward conditions have genuinely been met. The wallet must not be funded by imaginary earnings or by assuming a third-party task provider has paid you.
+
+**This prompt is designed to build the complete system in your existing SWAS TASKS project—not just the dashboard appearance.**

@@ -16,6 +16,7 @@ interface TaskDetailModalProps {
   onClose: () => void;
   onNavigate: (route: PublicRoute | WorkspaceRoute) => void;
   onOpenChat?: (conversationId: string) => void;
+  onOpenPublicPolicy?: (slug?: string | null) => void;
 }
 
 export function TaskDetailModal({
@@ -25,6 +26,7 @@ export function TaskDetailModal({
   onClose,
   onNavigate,
   onOpenChat,
+  onOpenPublicPolicy,
 }: TaskDetailModalProps) {
   const { firebaseUser, userPrivate } = useAuth();
   const [amountKes, setAmountKes] = useState(() => (task ? String(task.budgetKes) : '500'));
@@ -312,6 +314,34 @@ export function TaskDetailModal({
                   className="w-full min-h-[100px] px-3 py-2.5 swas-input bg-[#f9fbfe] border border-[#d7e2ef] rounded-[9px] focus:outline-none focus:border-[#1265c8]"
                 />
               </div>
+
+              {onOpenPublicPolicy && (
+                <p className="text-[12px] text-[#5b6d85]">
+                  Submitting a bid binds your proposal to the{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenPublicPolicy('task-participation');
+                    }}
+                    className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+                  >
+                    Task Participation Policy
+                  </button>{' '}
+                  and{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenPublicPolicy('user-conduct');
+                    }}
+                    className="text-[#1265c8] font-semibold hover:underline cursor-pointer"
+                  >
+                    User Conduct Rules
+                  </button>
+                  .
+                </p>
+              )}
 
               <div className="flex items-center justify-end gap-3">
                 <button

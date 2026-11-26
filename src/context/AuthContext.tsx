@@ -9,6 +9,7 @@ import {
   linkWithPopup,
   onAuthStateChanged,
   reauthenticateWithCredential,
+  reauthenticateWithPopup,
   sendEmailVerification,
   sendPasswordResetEmail,
   setPersistence,
@@ -29,12 +30,26 @@ import {
   pushNotification,
   syncGoogleProfileMetadataIfNeeded,
 } from '../lib/marketplaceService';
-import type { PublicProfile, UserPrivate, UserRole } from '../types/marketplace';
+import {
+  registerOperationalProfile,
+  syncVerificationStateBackend,
+} from '../lib/operationalService';
+import { recordPolicyAcceptances } from '../lib/policyService';
+import type { PolicyDocument, PublicProfile, UserPrivate, UserRole } from '../types/marketplace';
 
-interface PendingOnboarding {
+interface PendingPolicyAcceptanceInput {
+  policy: PolicyDocument;
+  context: string;
+}
+
+export interface PendingOnboarding {
   role: UserRole;
   displayName?: string;
+  username?: string;
+  phone?: string;
+  country?: string;
   businessName?: string;
+  acceptedPolicies?: PendingPolicyAcceptanceInput[];
 }
 
 export interface PendingGoogleLink {
@@ -130,12 +145,17 @@ interface AuthContextValue {
     email: string;
     password: string;
     displayName: string;
+    username: string;
+    phone: string;
+    country: string;
     role: UserRole;
     businessName?: string;
+    acceptedPolicies?: PendingPolicyAcceptanceInput[];
   }) => Promise<boolean>;
   loginWithEmail: (email: string, password: string, rememberMe?: boolean) => Promise<boolean>;
   resetPassword: (email: string) => Promise<boolean>;
   changeAccountPassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  reauthenticateCurrentUser: (password?: string) => Promise<void>;
   resendVerificationEmail: () => Promise<void>;
   refreshVerificationState: () => Promise<boolean>;
   completeOnboarding: (onboarding: PendingOnboarding) => Promise<void>;
@@ -188,12 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // If verified and pending onboarding exists (e.g. just verified email or signed up with role), auto-create docs
           const pending = readPendingOnboarding();
           if (firebaseUser.emailVerified && pending) {
-            await createUserAccountDocs(
-              firebaseUser,
-              pending.role,
-              pending.displayName,
-              pending.businessName
-            );
+            await provisionAccountDocsWithFallback(firebaseUser, pending);
             clearPendingOnboarding();
           } else {
             setUserPrivate(null);
@@ -241,6 +256,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authReady && firebaseUser && firebaseUser.emailVerified && profileLoaded && !userPrivate
   );
 
+  async function provisionAccountDocsWithFallback(
+    user: User,
+    onboarding: PendingOnboarding
+  ): Promise<void> {
+    const fallbackUsername =
+      onboarding.username?.trim() ||
+      `user_${user.uid.slice(0, 8).toLowerCase()}`;
+    const displayName =
+      onboarding.displayName?.trim() ||
+      user.displayName ||
+      user.email?.split('@')[0] ||
+      'SWAS Member';
+    try {
+      await registerOperationalProfile(user, {
+        role: onboarding.role,
+        displayName,
+        username: fallbackUsername,
+        phone: onboarding.phone?.trim() || '',
+        country: onboarding.country?.trim() || 'KE',
+        businessName: onboarding.businessName,
+      });
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.toLowerCase().includes('already taken')) {
+        throw err;
+      }
+      // If backend Admin SDK lacks IAM permissions on externally owned Firebase project, fallback to verified client rules
+      if (user.emailVerified) {
+        await createUserAccountDocs(
+          user,
+          onboarding.role,
+          onboarding.displayName,
+          onboarding.businessName,
+          {
+            username: onboarding.username,
+            phone: onboarding.phone,
+            country: onboarding.country,
+          }
+        );
+      }
+    }
+  }
+
   async function signInWithGoogle(
     onboarding?: PendingOnboarding,
     rememberMe = true
@@ -250,15 +309,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setPendingGoogleLink(null);
     try {
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-      if (onboarding) savePendingOnboarding(onboarding);
+      if (onboarding) {
+        savePendingOnboarding({
+          role: onboarding.role,
+          displayName: onboarding.displayName,
+          username: onboarding.username,
+          phone: onboarding.phone,
+          country: onboarding.country,
+          businessName: onboarding.businessName,
+        });
+      }
       const cred = await signInWithPopup(auth, googleProvider);
+      if (onboarding?.acceptedPolicies && onboarding.acceptedPolicies.length > 0) {
+        await recordPolicyAcceptances(cred.user.uid, onboarding.acceptedPolicies);
+      }
       if (onboarding && cred.user.emailVerified) {
-        await createUserAccountDocs(
-          cred.user,
-          onboarding.role,
-          onboarding.displayName,
-          onboarding.businessName
-        );
+        await provisionAccountDocsWithFallback(cred.user, onboarding);
         clearPendingOnboarding();
         if (cred.user.email) {
           void dispatchPlatformEmail({
@@ -267,11 +333,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             category:
               onboarding.role === 'client' ? 'client_registration' : 'worker_registration',
             recipientEmail: cred.user.email,
-            bodyText: `Welcome to SWAS TASKS! Your ${onboarding.role} workspace account is now active via Google Sign-In.`,
+            bodyText: `Welcome to SWAS TASKS! Your ${onboarding.role} workspace profile has been registered via Google Sign-In and queued for verification/approval.`,
           });
         }
       } else if (cred.user.emailVerified) {
         await syncGoogleProfileMetadataIfNeeded(cred.user);
+        void syncVerificationStateBackend(cred.user).catch(() => {});
         if (cred.user.email) {
           void dispatchPlatformEmail({
             user: cred.user,
@@ -324,7 +391,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await linkWithPopup(auth.currentUser, googleProvider);
       await syncGoogleProfileMetadataIfNeeded(result.user);
-      setFirebaseUser({ ...result.user } as User);
+      setFirebaseUser(result.user);
       await pushNotification({
         userId: result.user.uid,
         actorId: result.user.uid,
@@ -342,19 +409,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string;
     password: string;
     displayName: string;
+    username: string;
+    phone: string;
+    country: string;
     role: UserRole;
     businessName?: string;
+    acceptedPolicies?: PendingPolicyAcceptanceInput[];
   }): Promise<boolean> {
     setSigningIn(true);
     setAuthError(null);
     try {
-      savePendingOnboarding({
+      const onboardingData: PendingOnboarding = {
         role: params.role,
         displayName: params.displayName,
+        username: params.username,
+        phone: params.phone,
+        country: params.country,
         businessName: params.businessName,
-      });
+      };
+      savePendingOnboarding(onboardingData);
       const cred = await createUserWithEmailAndPassword(auth, params.email.trim(), params.password);
       await updateProfile(cred.user, { displayName: params.displayName.trim() });
+      if (params.acceptedPolicies && params.acceptedPolicies.length > 0) {
+        await recordPolicyAcceptances(cred.user.uid, params.acceptedPolicies);
+      }
+      await provisionAccountDocsWithFallback(cred.user, onboardingData).catch(() => {});
       await sendEmailVerification(cred.user);
       setEmailAuthUnavailable(false);
       return true;
@@ -466,6 +545,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  async function reauthenticateCurrentUser(password?: string): Promise<void> {
+    if (!auth.currentUser) {
+      throw new Error('Sign in before confirming your identity.');
+    }
+    const user = auth.currentUser;
+    const hasPassword = user.providerData.some((p) => p.providerId === 'password');
+    const hasGoogle = user.providerData.some((p) => p.providerId === 'google.com');
+
+    try {
+      if (password && hasPassword && user.email) {
+        const cred = EmailAuthProvider.credential(user.email, password);
+        await reauthenticateWithCredential(user, cred);
+        return;
+      }
+      if (hasGoogle) {
+        await reauthenticateWithPopup(user, googleProvider);
+        return;
+      }
+      if (hasPassword && user.email) {
+        throw new Error('Enter your account password to verify this payout change.');
+      }
+      throw new Error('Re-authentication provider unavailable.');
+    } catch (err) {
+      throw new Error(friendlyAuthError(err, hasGoogle && !password ? 'google' : 'email'));
+    }
+  }
+
   async function resendVerificationEmail(): Promise<void> {
     if (!firebaseUser) return;
     await sendEmailVerification(firebaseUser);
@@ -477,18 +583,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await firebaseUser.getIdToken(true);
     const refreshed = auth.currentUser;
     if (refreshed) {
-      setFirebaseUser({ ...refreshed } as User);
+      setFirebaseUser(refreshed);
       if (refreshed.emailVerified) {
         const pending = readPendingOnboarding();
         if (pending) {
-          await createUserAccountDocs(
-            refreshed,
-            pending.role,
-            pending.displayName,
-            pending.businessName
-          );
+          await provisionAccountDocsWithFallback(refreshed, pending);
           clearPendingOnboarding();
         }
+        await syncVerificationStateBackend(refreshed).catch(() => {});
         return true;
       }
     }
@@ -497,12 +599,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function completeOnboarding(onboarding: PendingOnboarding): Promise<void> {
     if (!firebaseUser) return;
-    await createUserAccountDocs(
-      firebaseUser,
-      onboarding.role,
-      onboarding.displayName,
-      onboarding.businessName
-    );
+    if (onboarding.acceptedPolicies && onboarding.acceptedPolicies.length > 0) {
+      await recordPolicyAcceptances(firebaseUser.uid, onboarding.acceptedPolicies);
+    }
+    await provisionAccountDocsWithFallback(firebaseUser, onboarding);
     clearPendingOnboarding();
     if (firebaseUser.email) {
       void dispatchPlatformEmail({
@@ -510,7 +610,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         surface: 'website',
         category: onboarding.role === 'client' ? 'client_registration' : 'worker_registration',
         recipientEmail: firebaseUser.email,
-        bodyText: `Welcome to SWAS TASKS! Your ${onboarding.role} workspace account is ready.`,
+        bodyText: `Welcome to SWAS TASKS! Your ${onboarding.role} workspace registration is recorded and queued for administrator verification.`,
       });
     }
   }
@@ -545,6 +645,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loginWithEmail,
         resetPassword,
         changeAccountPassword,
+        reauthenticateCurrentUser,
         resendVerificationEmail,
         refreshVerificationState,
         completeOnboarding,
